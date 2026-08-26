@@ -15,12 +15,19 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // Pre-create synthetic samples if not present
 const SAMPLES_DIR = path.join(process.cwd(), "sample_apks");
+const INPUT_DIR = path.join(process.cwd(), "input");
 if (!fs.existsSync(SAMPLES_DIR)) {
   fs.mkdirSync(SAMPLES_DIR, { recursive: true });
 }
+if (!fs.existsSync(INPUT_DIR)) {
+  fs.mkdirSync(INPUT_DIR, { recursive: true });
+}
 
-// Ensure demo apk exists
+// Ensure demo apk and apks exist
 const demoApkPath = path.join(SAMPLES_DIR, "demo.apk");
+const demoApksPath = path.join(SAMPLES_DIR, "demo.apks");
+const inputApksPath = path.join(INPUT_DIR, "app.apks");
+
 if (!fs.existsSync(demoApkPath)) {
   try {
     execFileAsync("python3", ["tests/create_test_apk.py", "--output", demoApkPath]);
@@ -29,36 +36,58 @@ if (!fs.existsSync(demoApkPath)) {
   }
 }
 
-// 1. API: List available sample APK targets
+if (!fs.existsSync(demoApksPath)) {
+  try {
+    execFileAsync("python3", ["-c", `from tests.create_test_apk import create_synthetic_apks; create_synthetic_apks('${demoApksPath}')`]);
+  } catch (err) {
+    console.error("Error creating demo APKS:", err);
+  }
+}
+
+if (!fs.existsSync(inputApksPath)) {
+  try {
+    execFileAsync("python3", ["-c", `from tests.create_test_apk import create_synthetic_apks; create_synthetic_apks('${inputApksPath}')`]);
+  } catch (err) {
+    console.error("Error creating input APKS:", err);
+  }
+}
+
+// 1. API: List available sample targets (.apk and .apks)
 app.get("/api/samples", (req, res) => {
   try {
     const samples = [
+      {
+        id: "apks_bundle",
+        name: "Android_App_Bundle_Export.apks",
+        description: "Android App Bundle (.apks) containing base.apk and split config APKs with classes*.dex",
+        path: "input/app.apks",
+        type: "APKS",
+        splitsCount: 3,
+        dexCount: 4,
+        provider: "Google Play Billing",
+        expectedClass: "SERVER_SIDE"
+      },
       {
         id: "demo",
         name: "PlayBilling_MultiDex_Target.apk",
         description: "Google Play Billing client with remote /subscription/verify API in classes3.dex",
         path: "sample_apks/demo.apk",
+        type: "APK",
+        splitsCount: 1,
         dexCount: 3,
         provider: "Google Play Billing",
-        expectedClass: "MIXED"
+        expectedClass: "SERVER_SIDE"
       },
       {
         id: "revenuecat",
         name: "RevenueCat_Entitlements_App.apk",
         description: "RevenueCat Purchases SDK with customerInfo entitlement check",
         path: "sample_apks/demo.apk",
-        dexCount: 2,
+        type: "APK",
+        splitsCount: 1,
+        dexCount: 3,
         provider: "RevenueCat",
         expectedClass: "SERVER_SIDE"
-      },
-      {
-        id: "obfuscated",
-        name: "Obfuscated_Store_Client.apk",
-        description: "ProGuard / R8 obfuscated classes (a.b.c) with Boolean status evaluator",
-        path: "sample_apks/demo.apk",
-        dexCount: 4,
-        provider: "Custom In-App Billing",
-        expectedClass: "CLIENT_SIDE"
       }
     ];
     res.json({ samples });
@@ -67,25 +96,34 @@ app.get("/api/samples", (req, res) => {
   }
 });
 
-// 2. API: Execute Static Analysis on target APK
+// 2. API: Execute Static Analysis on target APK or APKS
 app.post("/api/analyze", async (req, res) => {
   try {
     const { sampleId, customApkBase64, filename, enableGemini } = req.body;
-    let targetApkPath = demoApkPath;
+    let targetPath = demoApksPath;
 
-    // If custom APK uploaded as base64
+    if (sampleId === "demo") {
+      targetPath = demoApkPath;
+    } else if (sampleId === "apks_bundle") {
+      targetPath = fs.existsSync(inputApksPath) ? inputApksPath : demoApksPath;
+    }
+
+    // If custom APK or APKS uploaded as base64
     if (customApkBase64) {
       const uploadDir = path.join(process.cwd(), "output", "uploads");
       if (!fs.existsSync(uploadDir)) {
         fs.mkdirSync(uploadDir, { recursive: true });
       }
       const safeName = (filename || "uploaded.apk").replace(/[^a-zA-Z0-9._-]/g, "_");
-      targetApkPath = path.join(uploadDir, safeName);
+      targetPath = path.join(uploadDir, safeName);
       const buffer = Buffer.from(customApkBase64.split(",")[1] || customApkBase64, "base64");
-      fs.writeFileSync(targetApkPath, buffer);
-    } else if (!fs.existsSync(targetApkPath)) {
-      // Ensure synthetic demo apk exists
-      await execFileAsync("python3", ["tests/create_test_apk.py", "--output", targetApkPath]);
+      fs.writeFileSync(targetPath, buffer);
+    } else if (!fs.existsSync(targetPath)) {
+      if (targetPath.endsWith(".apks")) {
+        await execFileAsync("python3", ["-c", `from tests.create_test_apk import create_synthetic_apks; create_synthetic_apks('${targetPath}')`]);
+      } else {
+        await execFileAsync("python3", ["tests/create_test_apk.py", "--output", targetPath]);
+      }
     }
 
     const outDir = path.join(process.cwd(), "output", `run_${Date.now()}`);
@@ -93,7 +131,7 @@ app.post("/api/analyze", async (req, res) => {
 
     const pyArgs = [
       "analyze.py",
-      "--apk", targetApkPath,
+      "--apk", targetPath,
       "--output-dir", outDir
     ];
 

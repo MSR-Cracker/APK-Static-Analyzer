@@ -1,32 +1,32 @@
-"""JSON Reporter: Generates structured and schema-compliant analysis.json."""
+"""JSON Reporter: Exports full structured analysis findings into output/analysis.json."""
+import os
 import json
-from typing import Dict, Any
+import dataclasses
+from typing import Any
 from analyzer.models import AnalysisReport
 
 
+class EnhancedJSONEncoder(json.JSONEncoder):
+    """Custom encoder handling dataclasses and Enums."""
+    def default(self, o: Any) -> Any:
+        if dataclasses.is_dataclass(o):
+            return dataclasses.asdict(o)
+        if hasattr(o, "value"):
+            return o.value
+        if isinstance(o, set):
+            return list(o)
+        return super().default(o)
+
+
 class JsonReporter:
-    """Serializes analysis findings to compliant analysis.json."""
+    """Serializes the AnalysisReport model to a cleanly formatted JSON file."""
 
-    @staticmethod
-    def generate(report: AnalysisReport, output_path: str) -> Dict[str, Any]:
-        data = {
-            "apk": report.apk,
-            "dex_files": report.dex_files,
-            "billing": report.billing,
-            "purchase_boolean_methods": report.purchase_boolean_methods,
-            "constructors": report.constructors,
-            "network": report.network,
-            "call_graph": report.call_graph,
-            "classification": report.classification,
-            "evidence": report.evidence,
-            "analysis_status": report.analysis_status,
-            "warnings_or_errors": report.warnings_or_errors,
-        }
+    def __init__(self, report: AnalysisReport, output_path: str = "output/analysis.json"):
+        self.report = report
+        self.output_path = output_path
 
-        if report.gemini_interpretation:
-            data["gemini_interpretation"] = report.gemini_interpretation
-
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-
-        return data
+    def generate(self) -> str:
+        os.makedirs(os.path.dirname(os.path.abspath(self.output_path)), exist_ok=True)
+        with open(self.output_path, "w", encoding="utf-8") as f:
+            json.dump(self.report, f, cls=EnhancedJSONEncoder, indent=2, ensure_ascii=False)
+        return self.output_path

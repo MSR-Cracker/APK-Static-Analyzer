@@ -1,0 +1,533 @@
+{
+  "analysis_timestamp": "2026-08-26T16:17:58.451939Z",
+  "apk_info": {
+    "file_name": "app.apks",
+    "file_size_bytes": 2109,
+    "package_name": "com.example.targetapp",
+    "app_label": "Targetapp",
+    "version_name": "1.0",
+    "version_code": "1",
+    "min_sdk": "21",
+    "target_sdk": "33",
+    "compile_sdk": "",
+    "input_type": "APKS",
+    "container_name": "app.apks",
+    "contained_apks": [
+      {
+        "name": "base-master.apk",
+        "file_size_bytes": 1421,
+        "dex_count": 3,
+        "is_base": true,
+        "split_type": "base",
+        "package_name": "com.example.targetapp",
+        "version_name": "1.0",
+        "version_code": "1",
+        "permissions": [
+          "android.permission.INTERNET",
+          "com.android.vending.BILLING"
+        ]
+      },
+      {
+        "name": "split_hdpi.apk",
+        "file_size_bytes": 473,
+        "dex_count": 1,
+        "is_base": false,
+        "split_type": "config_density",
+        "package_name": "com.example.targetapp",
+        "version_name": "1.0",
+        "version_code": "1",
+        "permissions": []
+      },
+      {
+        "name": "split_config.arm64_v8a.apk",
+        "file_size_bytes": 190,
+        "dex_count": 0,
+        "is_base": false,
+        "split_type": "config_abi",
+        "package_name": "com.example.targetapp",
+        "version_name": "1.0",
+        "version_code": "1",
+        "permissions": []
+      }
+    ],
+    "permissions": [
+      "android.permission.INTERNET",
+      "com.android.vending.BILLING"
+    ],
+    "activities": [
+      "com.example.app.MainActivity"
+    ],
+    "services": [],
+    "receivers": [],
+    "providers": [],
+    "native_libraries": [],
+    "assets": [],
+    "signing_info": {
+      "scheme_v1": true,
+      "scheme_v2": true
+    },
+    "dex_files_info": [
+      {
+        "name": "classes.dex",
+        "size_bytes": 369,
+        "source_apk": "base-master.apk"
+      },
+      {
+        "name": "classes2.dex",
+        "size_bytes": 412,
+        "source_apk": "base-master.apk"
+      },
+      {
+        "name": "classes3.dex",
+        "size_bytes": 470,
+        "source_apk": "base-master.apk"
+      },
+      {
+        "name": "split_hdpi.apk:classes.dex",
+        "size_bytes": 333,
+        "source_apk": "split_hdpi.apk"
+      }
+    ],
+    "total_dex_count": 4
+  },
+  "input_type": "APKS",
+  "container_name": "app.apks",
+  "contained_apks": [
+    {
+      "name": "base-master.apk",
+      "file_size_bytes": 1421,
+      "dex_count": 3,
+      "is_base": true,
+      "split_type": "base",
+      "package_name": "com.example.targetapp",
+      "version_name": "1.0",
+      "version_code": "1",
+      "permissions": [
+        "android.permission.INTERNET",
+        "com.android.vending.BILLING"
+      ]
+    },
+    {
+      "name": "split_hdpi.apk",
+      "file_size_bytes": 473,
+      "dex_count": 1,
+      "is_base": false,
+      "split_type": "config_density",
+      "package_name": "com.example.targetapp",
+      "version_name": "1.0",
+      "version_code": "1",
+      "permissions": []
+    },
+    {
+      "name": "split_config.arm64_v8a.apk",
+      "file_size_bytes": 190,
+      "dex_count": 0,
+      "is_base": false,
+      "split_type": "config_abi",
+      "package_name": "com.example.targetapp",
+      "version_name": "1.0",
+      "version_code": "1",
+      "permissions": []
+    }
+  ],
+  "apk": {},
+  "dex_files": [
+    {
+      "name": "classes.dex",
+      "source_apk": "base-master.apk",
+      "size_bytes": 369,
+      "class_count": 1,
+      "method_count": 2,
+      "unsupported_opcodes_count": 0,
+      "analysis_quality": "FULL"
+    },
+    {
+      "name": "classes2.dex",
+      "source_apk": "base-master.apk",
+      "size_bytes": 412,
+      "class_count": 1,
+      "method_count": 2,
+      "unsupported_opcodes_count": 0,
+      "analysis_quality": "FULL"
+    },
+    {
+      "name": "classes3.dex",
+      "source_apk": "base-master.apk",
+      "size_bytes": 470,
+      "class_count": 1,
+      "method_count": 2,
+      "unsupported_opcodes_count": 0,
+      "analysis_quality": "FULL"
+    },
+    {
+      "name": "split_hdpi.apk:classes.dex",
+      "source_apk": "split_hdpi.apk",
+      "size_bytes": 333,
+      "class_count": 1,
+      "method_count": 2,
+      "unsupported_opcodes_count": 0,
+      "analysis_quality": "FULL"
+    }
+  ],
+  "obfuscation": {
+    "status": "NO",
+    "confidence": "MEDIUM",
+    "evidence": [
+      "Standard readable class, package, and method identifiers preserved"
+    ],
+    "short_class_ratio": 0.0,
+    "short_method_ratio": 0.0,
+    "short_package_ratio": 0.0,
+    "missing_debug_info_ratio": 0.0,
+    "proguard_r8_patterns": []
+  },
+  "billing": {
+    "providers_detected": [
+      "Google Play Billing Library"
+    ],
+    "features_detected": [],
+    "billing_classes": [
+      "com.android.billingclient.api.BillingClient",
+      "com.example.billing.PurchaseManager"
+    ],
+    "billing_methods": [],
+    "has_play_billing": false,
+    "has_google_play": true,
+    "has_aidl": false,
+    "has_revenuecat": false,
+    "has_qonversion": false,
+    "has_adapty": false,
+    "has_stripe": false,
+    "has_paypal": false,
+    "has_webview_payment": false,
+    "has_custom": false,
+    "has_custom_billing": false,
+    "google_play_version": "Unknown",
+    "evidence": [
+      "Google Play Billing classes present: ['com.android.billingclient.api.BillingClient']",
+      "References in-app billing SKU/action string: 'https://api.example.com/subscription/verify'"
+    ],
+    "confidence": "HIGH",
+    "evidence_id": "E001"
+  },
+  "classification": {
+    "classification": "SERVER_SIDE",
+    "confidence": "MEDIUM",
+    "reasons": [
+      "Entitlement verification is delegated to remote backend API servers with no standalone local override detected."
+    ],
+    "server_side_evidence": [
+      "Application communicates with dedicated receipt/entitlement verification endpoints: ['https://api.example.com/subscription/verify', 'https://billing.example.com/v1/receipts']"
+    ],
+    "client_side_evidence": [],
+    "evidence_id": null
+  },
+  "class_analysis": {
+    "primary_purchase_class": "com.example.billing.PurchaseManager",
+    "primary_premium_class": "com.example.billing.PurchaseManager",
+    "primary_boolean_method": "com.example.billing.PurchaseManager->isPurchased",
+    "primary_boolean_dex": "classes3.dex",
+    "primary_boolean_signature": "()Z",
+    "confidence": "HIGH",
+    "evidence": [
+      "Identified primary billing coordination class: 'com.example.billing.PurchaseManager'",
+      "Identified primary gate boolean check: 'com.example.billing.PurchaseManager->isPurchased' (classes3.dex)"
+    ],
+    "top_purchase_classes": [
+      "com.example.billing.PurchaseManager",
+      "com.android.billingclient.api.BillingClient"
+    ],
+    "top_premium_classes": [
+      "com.example.billing.PurchaseManager"
+    ]
+  },
+  "boolean_candidates": [
+    {
+      "dex_file": "classes3.dex",
+      "class_name": "com.example.billing.PurchaseManager",
+      "package": "com.example.billing",
+      "method_name": "isPurchased",
+      "signature": "()Z",
+      "return_type": "boolean",
+      "source_apk": "base-master.apk",
+      "parameters": [],
+      "access_flags": [
+        "public"
+      ],
+      "is_static": false,
+      "is_native": false,
+      "is_abstract": false,
+      "is_constructor": false,
+      "source_location": "com.example.billing.PurchaseManager->isPurchased",
+      "callers": [],
+      "callees": [],
+      "confidence": "HIGH",
+      "status": "Confirmed",
+      "purchase_relevance_evidence": [
+        "Method name matches key entitlement pattern: 'ispurchased' (+4.5)",
+        "Enclosing class 'com.example.billing.PurchaseManager' is a dedicated monetization/entitlement container (+3.0)",
+        "References monetization string constant: 'isPurchased' (+2.0)",
+        "References monetization string constant: 'is_purchased' (+2.0)"
+      ],
+      "score": 11.5,
+      "decompiled_snippet": null,
+      "why_identified": "Method name matches key entitlement pattern: 'ispurchased' (+4.5); Enclosing class 'com.example.billing.PurchaseManager' is a dedicated monetization/entitlement container (+3.0); References monetization string constant: 'isPurchased' (+2.0)",
+      "evidence_id": "E003",
+      "analysis_quality": "FULL"
+    }
+  ],
+  "boolean_verification_locations": [],
+  "call_sites": [],
+  "constructors": [
+    {
+      "dex_file": "classes2.dex",
+      "class_name": "com.android.billingclient.api.BillingClient",
+      "constructor_signature": "<init>()V",
+      "verification": "NO",
+      "network_interaction": "NO",
+      "source_apk": "base-master.apk",
+      "initializes_billing_client": false,
+      "sets_premium_flags": false,
+      "reads_local_state": false,
+      "loads_remote_config": false,
+      "called_methods": [],
+      "evidence": [],
+      "boolean_field_initialized": "",
+      "evidence_id": "E004",
+      "snippet": null
+    },
+    {
+      "dex_file": "classes3.dex",
+      "class_name": "com.example.billing.PurchaseManager",
+      "constructor_signature": "<init>()V",
+      "verification": "NO",
+      "network_interaction": "NO",
+      "source_apk": "base-master.apk",
+      "initializes_billing_client": false,
+      "sets_premium_flags": false,
+      "reads_local_state": false,
+      "loads_remote_config": false,
+      "called_methods": [],
+      "evidence": [],
+      "boolean_field_initialized": "",
+      "evidence_id": "E005",
+      "snippet": null
+    }
+  ],
+  "network_endpoints": [
+    {
+      "url": "https://api.example.com/subscription/verify",
+      "domain": "api.example.com",
+      "http_method": "POST",
+      "client_library": "HttpURLConnection",
+      "referenced_from_class": "com.example.billing.PurchaseManager",
+      "referenced_from_method": "<init>",
+      "dex_file": "classes3.dex",
+      "source_apk": "base-master.apk",
+      "is_purchase_related": true,
+      "relevance_level": "HIGH",
+      "relevance_reason": "Endpoint URL matches purchase/receipt validation path keyword and is referenced in com.example.billing.PurchaseManager-><init>",
+      "evidence_id": "E006"
+    },
+    {
+      "url": "https://billing.example.com/v1/receipts",
+      "domain": "billing.example.com",
+      "http_method": null,
+      "client_library": "HttpURLConnection",
+      "referenced_from_class": "com.example.billing.PurchaseManager",
+      "referenced_from_method": "<init>",
+      "dex_file": "classes3.dex",
+      "source_apk": "base-master.apk",
+      "is_purchase_related": true,
+      "relevance_level": "HIGH",
+      "relevance_reason": "Endpoint URL matches purchase/receipt validation path keyword and is referenced in com.example.billing.PurchaseManager-><init>",
+      "evidence_id": "E007"
+    }
+  ],
+  "evidence_inventory": [
+    {
+      "id": "E001",
+      "category": "BILLING_SDK",
+      "summary": "Detected Billing Providers: Google Play Billing Library",
+      "description": "Google Play Billing classes present: ['com.android.billingclient.api.BillingClient']; References in-app billing SKU/action string: 'https://api.example.com/subscription/verify'",
+      "confidence": "HIGH",
+      "dex_file": null,
+      "class_name": null,
+      "method_name": null,
+      "offset": null,
+      "details": {
+        "providers": [
+          "Google Play Billing Library"
+        ],
+        "classes": [
+          "com.android.billingclient.api.BillingClient",
+          "com.example.billing.PurchaseManager"
+        ],
+        "google_play_version": "Unknown"
+      }
+    },
+    {
+      "id": "E002",
+      "category": "OBFUSCATION",
+      "summary": "Obfuscation Status: NO",
+      "description": "Standard readable class, package, and method identifiers preserved",
+      "confidence": "MEDIUM",
+      "dex_file": null,
+      "class_name": null,
+      "method_name": null,
+      "offset": null,
+      "details": {
+        "short_class_ratio": 0.0,
+        "short_method_ratio": 0.0
+      }
+    },
+    {
+      "id": "E003",
+      "category": "BOOLEAN_METHOD",
+      "summary": "Boolean Gate Candidate: com.example.billing.PurchaseManager->isPurchased()Z",
+      "description": "Method name matches key entitlement pattern: 'ispurchased' (+4.5); Enclosing class 'com.example.billing.PurchaseManager' is a dedicated monetization/entitlement container (+3.0); References monetization string constant: 'isPurchased' (+2.0)",
+      "confidence": "HIGH",
+      "dex_file": "classes3.dex",
+      "class_name": "com.example.billing.PurchaseManager",
+      "method_name": "isPurchased",
+      "offset": null,
+      "details": {
+        "score": 11.5,
+        "return_type": "boolean",
+        "callers_count": 0,
+        "evidence_items": [
+          "Method name matches key entitlement pattern: 'ispurchased' (+4.5)",
+          "Enclosing class 'com.example.billing.PurchaseManager' is a dedicated monetization/entitlement container (+3.0)",
+          "References monetization string constant: 'isPurchased' (+2.0)",
+          "References monetization string constant: 'is_purchased' (+2.0)"
+        ],
+        "decompiled_snippet": null
+      }
+    },
+    {
+      "id": "E004",
+      "category": "CONSTRUCTOR_CHECK",
+      "summary": "Constructor: com.android.billingclient.api.BillingClient-><init>",
+      "description": "Premium verification: NO; Network interaction: NO. Evidence: ",
+      "confidence": "MEDIUM",
+      "dex_file": "classes2.dex",
+      "class_name": "com.android.billingclient.api.BillingClient",
+      "method_name": null,
+      "offset": null,
+      "details": {
+        "verification": "NO",
+        "network_interaction": "NO",
+        "initializes_billing_client": false,
+        "sets_premium_flags": false,
+        "reads_local_state": false
+      }
+    },
+    {
+      "id": "E005",
+      "category": "CONSTRUCTOR_CHECK",
+      "summary": "Constructor: com.example.billing.PurchaseManager-><init>",
+      "description": "Premium verification: NO; Network interaction: NO. Evidence: ",
+      "confidence": "MEDIUM",
+      "dex_file": "classes3.dex",
+      "class_name": "com.example.billing.PurchaseManager",
+      "method_name": null,
+      "offset": null,
+      "details": {
+        "verification": "NO",
+        "network_interaction": "NO",
+        "initializes_billing_client": false,
+        "sets_premium_flags": false,
+        "reads_local_state": false
+      }
+    },
+    {
+      "id": "E006",
+      "category": "NETWORK_ENDPOINT",
+      "summary": "Network Endpoint: https://api.example.com/subscription/verify",
+      "description": "Endpoint URL matches purchase/receipt validation path keyword and is referenced in com.example.billing.PurchaseManager-><init>",
+      "confidence": "HIGH",
+      "dex_file": "classes3.dex",
+      "class_name": "com.example.billing.PurchaseManager",
+      "method_name": "<init>",
+      "offset": null,
+      "details": {
+        "domain": "api.example.com",
+        "client_library": "HttpURLConnection",
+        "relevance_level": "HIGH"
+      }
+    },
+    {
+      "id": "E007",
+      "category": "NETWORK_ENDPOINT",
+      "summary": "Network Endpoint: https://billing.example.com/v1/receipts",
+      "description": "Endpoint URL matches purchase/receipt validation path keyword and is referenced in com.example.billing.PurchaseManager-><init>",
+      "confidence": "HIGH",
+      "dex_file": "classes3.dex",
+      "class_name": "com.example.billing.PurchaseManager",
+      "method_name": "<init>",
+      "offset": null,
+      "details": {
+        "domain": "billing.example.com",
+        "client_library": "HttpURLConnection",
+        "relevance_level": "HIGH"
+      }
+    }
+  ],
+  "cfgs": [],
+  "ai_reasoning": {
+    "purchase_logic_exists": "YES",
+    "architecture": "SERVER_SIDE",
+    "confidence": "MEDIUM",
+    "primary_boolean_method_info": {
+      "dex": "classes3.dex",
+      "class": "com.example.billing.PurchaseManager",
+      "method": "com.example.billing.PurchaseManager->isPurchased",
+      "signature": "()Z",
+      "return_type": "boolean",
+      "confidence": "HIGH"
+    },
+    "boolean_verification_location_info": {
+      "caller_class": "None",
+      "caller_method": "None",
+      "instruction_offset": "N/A",
+      "branch_opcode": "N/A",
+      "true_path": "N/A",
+      "false_path": "N/A"
+    },
+    "constructor_premium_check": "NO",
+    "constructor_evidence": [],
+    "cited_evidence_ids": [
+      "E001",
+      "E002",
+      "E003",
+      "E004",
+      "E005",
+      "E006",
+      "E007"
+    ],
+    "architecture_summary": "The application implements a SERVER_SIDE monetization model based on static Dalvik DEX disassembly. Billing operations are coordinated through 'com.example.billing.PurchaseManager', with feature gating controlled by 'com.example.billing.PurchaseManager->isPurchased'.",
+    "purchase_flow_explanation": "1. User initiates a purchase or app checks existing entitlements via 'com.example.billing.PurchaseManager'.\n2. Billing state or purchase token is queried through registered providers: Google Play Billing Library.\n3. Premium entitlement state is evaluated and returned via 'com.example.billing.PurchaseManager->isPurchased'.",
+    "boolean_gate_explanation": "Feature access is gated through boolean validation routines. No direct branch verification call sites mapped.",
+    "security_assessment": "Server-authoritative token validation protects premium endpoints against purely client-side binary modification.",
+    "reasoning_chain": [
+      "Identified 4 DEX files across split/base APK containers.",
+      "Discovered 1 billing provider SDK integrations (Google Play Billing Library).",
+      "Mapped 1 boolean entitlement candidates, with top candidate 'com.example.billing.PurchaseManager->isPurchased'.",
+      "Located 0 conditional branch gating sites.",
+      "Constructor premium check assessed as: 'NO'.",
+      "Concluded SERVER_SIDE architecture with grounded evidence."
+    ],
+    "has_discrepancy": false,
+    "discrepancy_details": "",
+    "is_ai_generated": false,
+    "raw_response": null
+  },
+  "analysis_status": "COMPLETED",
+  "analysis_quality": "FULL",
+  "unsupported_opcodes_detected": [],
+  "warnings_or_errors": [],
+  "limitations": [
+    "Static analysis alone cannot capture runtime dynamic code loading (DexClassLoader) or native JNI integrity checks without instrumentation.",
+    "Backend server-side API responses require valid network credentials and active runtime communication to observe live payload schemas."
+  ]
+}

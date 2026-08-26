@@ -1,150 +1,89 @@
-name: APK In-App Billing Static Analysis
+name: "APK / APKS Static Analysis"
 
-# MANUAL WORKFLOW DISPATCH ONLY
-# This workflow is strictly manual and does NOT trigger on push or pull_request.
 on:
   workflow_dispatch:
-    inputs:
-      apk_path:
-        description: 'Relative path to the APK file in repository (e.g. sample_apks/app.apk)'
-        required: false
-        default: ''
-      apk_url:
-        description: 'Direct download URL for the APK to analyze (if not in repository)'
-        required: false
-        default: ''
-      enable_gemini:
-        description: 'Enable Gemini AI static fact interpretation (requires GEMINI_API_KEY secret)'
-        type: boolean
-        required: false
-        default: true
-      install_jadx:
-        description: 'Install JADX CLI for full Java source decompilation'
-        type: boolean
-        required: false
-        default: true
 
 jobs:
-  static-analysis:
-    name: Run Multi-DEX Static Analysis & Purchase Detection
+  analyze:
+    name: "Perform Deep Static Analysis"
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
 
     steps:
-      # Step 1: Checkout repository
-      - name: 1. Checkout Repository
+      - name: "Checkout Repository"
         uses: actions/checkout@v4
 
-      # Step 2: Setup Java Environment (for JADX / Dalvik tools)
-      - name: 2. Setup Java JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      # Step 3: Setup Python Environment
-      - name: 3. Setup Python 3.10
+      - name: "Set up Python"
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
-      # Step 4: Install Analyzer Dependencies
-      - name: 4. Install Analyzer Dependencies
+      - name: "Install Python Dependencies"
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install google-genai pytest
 
-      # Step 5: Optional Install JADX CLI
-      - name: 5. Install JADX CLI (Optional)
-        if: ${{ inputs.install_jadx }}
+      - name: "Validate Target Input File"
         run: |
-          echo "Installing JADX decompiler..."
-          JADX_VERSION="1.5.0"
-          wget -q https://github.com/skylot/jadx/releases/download/v${JADX_VERSION}/jadx-${JADX_VERSION}.zip -O /tmp/jadx.zip
-          mkdir -p /opt/jadx
-          unzip -q /tmp/jadx.zip -d /opt/jadx
-          echo "/opt/jadx/bin" >> $GITHUB_PATH
-
-      # Step 6: Obtain Target APK
-      - name: 6. Obtain Target APK
-        id: get_apk
-        run: |
-          mkdir -p target_apk
-          TARGET_FILE=""
-
-          if [ -n "${{ inputs.apk_url }}" ]; then
-            echo "Downloading target APK from provided URL..."
-            curl -L -s -o target_apk/app.apk "${{ inputs.apk_url }}"
-            TARGET_FILE="target_apk/app.apk"
-          elif [ -n "${{ inputs.apk_path }}" ] && [ -f "${{ inputs.apk_path }}" ]; then
-            echo "Using target APK from repository path: ${{ inputs.apk_path }}"
-            TARGET_FILE="${{ inputs.apk_path }}"
-          else
-            # Search for any APK in workspace or generate test fixture
-            FOUND_APK=$(find . -name "*.apk" | head -n 1)
-            if [ -n "$FOUND_APK" ]; then
-              echo "Found APK in workspace: $FOUND_APK"
-              TARGET_FILE="$FOUND_APK"
-            else
-              echo "No APK input specified. Creating verified synthetic Multi-DEX fixture for self-test..."
-              python tests/create_test_apk.py --output target_apk/test_app.apk
-              TARGET_FILE="target_apk/test_app.apk"
-            fi
-          fi
-
-          echo "TARGET_APK_PATH=$TARGET_FILE" >> $GITHUB_OUTPUT
-
-      # Step 7: Validate Target APK
-      - name: 7. Validate APK Integrity
-        run: |
-          APK="${{ steps.get_apk.outputs.TARGET_APK_PATH }}"
-          if [ ! -f "$APK" ]; then
-            echo "ERROR: Target APK file does not exist at $APK"
+          mkdir -p input
+          if [ ! -f "input/app.apk" ] && [ ! -f "input/app.apks" ] && [ -z "$(ls -A input/*.apk input/*.apks 2>/dev/null)" ]; then
+            echo "::error ::No APK or APKS target found in input/ directory. Please place input/app.apk or input/app.apks before running."
             exit 1
           fi
-          echo "Target APK file size: $(ls -lh "$APK" | awk '{print $5}')"
-          # Check ZIP magic bytes (PK\x03\x04)
-          head -c 4 "$APK" | grep -q "PK" || { echo "ERROR: File is not a valid ZIP/APK archive"; exit 1; }
+          echo "Target input file confirmed."
 
-      # Step 8: Execute Static Analysis Pipeline
-      - name: 8. Execute Multi-DEX & In-App Purchase Static Analysis
+      - name: "Run Deep Static Analysis Pipeline"
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          mkdir -p analysis_output
-          EXTRA_ARGS=""
-          if [ "${{ inputs.enable_gemini }}" = "true" ] && [ -n "$GEMINI_API_KEY" ]; then
-            EXTRA_ARGS="--gemini"
-          fi
+          python analyze.py
 
-          python analyze.py \
-            --apk "${{ steps.get_apk.outputs.TARGET_APK_PATH }}" \
-            --output-dir analysis_output \
-            $EXTRA_ARGS \
-            --verbose
-
-      # Step 9: Verify Generated Artifacts
-      - name: 9. Verify Generated Artifacts
+      - name: "Publish Job Summary"
+        if: always()
         run: |
-          if [ ! -f "analysis_output/analysis.json" ]; then
-            echo "ERROR: analysis.json was not generated!"
-            exit 1
-          fi
-          if [ ! -f "analysis_output/report.html" ]; then
-            echo "ERROR: report.html was not generated!"
-            exit 1
-          fi
-          echo "Artifacts generated successfully."
+          if [ -f "output/analysis.json" ]; then
+            python -c '
+import json
+with open("output/analysis.json") as f:
+    d = json.load(f)
+apk = d.get("apk_info", {})
+billing = d.get("billing", {})
+cls = d.get("class_analysis", {})
+clf = d.get("classification", {})
+verifs = d.get("boolean_verification_locations", [])
+ctors = d.get("constructors", [])
+obf = d.get("obfuscation", {})
+ai = d.get("ai_reasoning", {})
 
-      # Step 10: Upload Analysis Artifacts
-      - name: 10. Upload Static Analysis Report Artifacts
+summary = f"""### APK ANALYSIS SUMMARY
+- **Package**: `{apk.get("package_name", "Unknown")}`
+- **Version**: `{apk.get("version_name", "N/A")} ({apk.get("version_code", "N/A")})`
+- **DEX count**: `{len(d.get("dex_files", []))}`
+- **Obfuscated**: `{obf.get("status", "NO")}`
+- **Billing detected**: `{", ".join(billing.get("providers_detected", [])) or "None"}`
+- **Payment architecture**: `{clf.get("classification", "UNKNOWN")}`
+
+- **Primary purchase class**: `{cls.get("primary_purchase_class", "None")}`
+- **Primary purchase method**: `{cls.get("primary_boolean_method", "None")}`
+- **DEX**: `{cls.get("primary_boolean_dex", "N/A")}`
+- **Signature**: `{cls.get("primary_boolean_signature", "()Z")}`
+
+- **Boolean verification**: `{verifs[0]["class_name"] + "->" + verifs[0]["method_name"] if verifs else "None detected"}`
+- **Constructor premium check**: `{ctors[0]["verification"] if ctors else "NO"}`
+
+- **Confidence**: `{clf.get("confidence", "LOW")}`
+"""
+with open(os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null"), "a") as out:
+    out.write(summary)
+'
+          fi
+
+      - name: "Upload Analysis Artifacts"
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: apk-purchase-analysis-report
+          name: "static-analysis-reports"
           path: |
-            analysis_output/analysis.json
-            analysis_output/report.html
-          retention-days: 14
+            output/analysis.json
+            output/report.html
+          retention-days: 30

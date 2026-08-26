@@ -1,4 +1,4 @@
-"""Decompilation manager integrating JADX CLI with fallback Dalvik bytecode disassembly."""
+"""Decompilation manager integrating JADX CLI with Dalvik bytecode disassembly as the primary ground truth."""
 import os
 import shutil
 import subprocess
@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class Decompiler:
-    """Manages JADX decompilation when available or returns bytecode snippets."""
+    """Manages JADX decompilation when available or extracts source snippets to assist human and AI readability."""
 
     def __init__(self, jadx_path: Optional[str] = None):
         self.jadx_path = jadx_path or shutil.which("jadx")
@@ -18,9 +18,9 @@ class Decompiler:
         return self.jadx_path is not None and os.path.exists(self.jadx_path)
 
     def decompile(self, apk_path: str, output_dir: str) -> bool:
-        """Runs JADX CLI to decompile APK into Java source files."""
+        """Runs JADX CLI to produce Java source files for readable snippet extraction."""
         if not self.is_available():
-            logger.info("JADX binary not found in PATH; using Dalvik static disassembly.")
+            logger.info("JADX binary not found in PATH; using Dalvik static bytecode disassembly as source of truth.")
             return False
 
         try:
@@ -28,7 +28,7 @@ class Decompiler:
                 self.jadx_path,
                 "-d", output_dir,
                 "--no-res",
-                "--no-src",
+                "--show-bad-code",
                 apk_path
             ]
             logger.info(f"Running JADX: {' '.join(cmd)}")
@@ -43,11 +43,12 @@ class Decompiler:
         if not decompiled_dir or not os.path.exists(decompiled_dir):
             return None
 
-        # Path: decompiled_dir/sources/com/example/MyClass.java
+        # Path: decompiled_dir/sources/com/example/MyClass.java or decompiled_dir/sources/defpackage/a.java
         rel_path = class_name.replace(".", "/") + ".java"
         possible_paths = [
             os.path.join(decompiled_dir, "sources", rel_path),
             os.path.join(decompiled_dir, rel_path),
+            os.path.join(decompiled_dir, "sources", "defpackage", os.path.basename(rel_path)),
         ]
 
         for p in possible_paths:
@@ -55,13 +56,14 @@ class Decompiler:
                 try:
                     with open(p, "r", encoding="utf-8", errors="ignore") as f:
                         content = f.read()
-                    # Find method
-                    pos = content.find(f" {method_name}(")
-                    if pos != -1:
-                        # Extract up to 15 lines
-                        start = max(0, content.rfind("\n", 0, pos))
-                        lines = content[start:].split("\n")[:12]
-                        return "\n".join(lines)
+                    # Look for method definition
+                    search_targets = [f" {method_name}(", f"\t{method_name}(", f"\n{method_name}("]
+                    for target in search_targets:
+                        pos = content.find(target)
+                        if pos != -1:
+                            start = max(0, content.rfind("\n", 0, pos))
+                            lines = content[start:].split("\n")[:20]
+                            return "\n".join(lines)
                 except Exception:
                     pass
         return None

@@ -1,5 +1,5 @@
 """Targeted Call Graph builder focusing on payment, verification, boolean check, and network paths."""
-from typing import List, Dict, Set, Any
+from typing import List, Dict, Set, Any, Tuple
 from analyzer.models import DexMethod, CallGraphData, CallGraphNode, CallGraphEdge, BooleanMethodCandidate, NetworkEndpoint
 
 
@@ -28,12 +28,14 @@ class PaymentCallGraphBuilder:
                 label=f"{cand.class_name.split('.')[-1]}.{cand.method_name}()",
                 type="boolean_check",
                 dex_file=cand.dex_file,
+                source_apk=cand.source_apk,
                 details={
                     "class": cand.class_name,
                     "method": cand.method_name,
                     "signature": cand.signature,
                     "confidence": cand.confidence.value,
                     "dex": cand.dex_file,
+                    "source_apk": cand.source_apk,
                 }
             )
 
@@ -79,7 +81,8 @@ class PaymentCallGraphBuilder:
                         label=ep.url[:35] + ("..." if len(ep.url) > 35 else ""),
                         type="network",
                         dex_file=ep.dex_file,
-                        details={"url": ep.url, "domain": ep.domain, "http_method": ep.http_method or "POST"}
+                        source_apk=ep.source_apk,
+                        details={"url": ep.url, "domain": ep.domain, "http_method": ep.http_method or "POST", "source_apk": ep.source_apk}
                     )
                 # Link from referenced method
                 ref_id = f"{ep.referenced_from_class}->{ep.referenced_from_method}"

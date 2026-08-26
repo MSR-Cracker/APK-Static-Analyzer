@@ -1,97 +1,107 @@
-"""Constructor Analyzer: Inspects <init> methods for purchase state setup, verification, local caching, and remote configs."""
+"""Constructor Analyzer: Inspects <init> and <clinit> methods for state bootstrapping, local caching, and verification."""
 from typing import List, Dict, Set
 from analyzer.models import DexMethod, ConstructorFinding
 from analyzer.detectors.base import BaseDetector
 
 
 class ConstructorAnalyzer(BaseDetector):
-    """Deeply evaluates <init> constructors of billing-related and manager classes."""
+    """Analyzes class constructors to determine whether premium state or billing verification occurs at instantiation."""
 
     def detect(self) -> List[ConstructorFinding]:
         findings: List[ConstructorFinding] = []
-        
-        # Filter for constructors in billing/manager/store classes
-        constructors = [
-            m for m in self.methods
-            if m.is_constructor and (
-                any(k in m.class_name.lower() for k in ["billing", "purchase", "subscription", "premium", "store", "iap", "licens", "manager"])
-                or any(k in "".join(m.strings_referenced).lower() for k in ["billing", "premium", "purchase", "sku", "license"])
-            )
-        ]
 
-        for c in constructors:
+        # Find constructors of candidate / monetization classes
+        constructors = [m for m in self.methods if m.is_constructor]
+
+        for m in constructors:
+            c_lower = m.class_name.lower()
+            is_monetization_class = any(
+                k in c_lower for k in [
+                    "billing", "purchase", "premium", "subscription", "entitlement", "license",
+                    "paywall", "checkout", "inapp", "useraccount", "session"
+                ]
+            )
+
+            # Check for specific behaviors in constructor instructions and callees
+            initializes_billing = False
+            sets_premium = False
+            reads_local = False
+            loads_remote = False
+            has_network = False
             evidence: List[str] = []
-            initializes_billing_client = False
-            sets_premium_flags = False
-            reads_local_state = False
-            loads_remote_config = False
-            has_network_call = False
-            is_verification = False
 
-            # Check callees
-            for callee in c.callees:
+            for callee in m.callees:
                 callee_lower = callee.lower()
+                # 1. Billing SDK builder / initialization (Note: this is SDK init, NOT premium verification!)
+                if "billingclient" in callee_lower or "purchases" in callee_lower or "newbuilder" in callee_lower:
+                    initializes_billing = True
+                    evidence.append(f"Initializes Billing SDK client: '{callee}' (SDK initialization, not direct verification)")
 
-                if "billingclient" in callee_lower or "newbuilder" in callee_lower:
-                    initializes_billing_client = True
-                    evidence.append("Initializes BillingClient instance via builder")
+                # 2. Local state / SharedPreferences access
+                if "sharedpreferences" in callee_lower or "getboolean" in callee_lower or "preferences" in callee_lower:
+                    reads_local = True
+                    evidence.append(f"Reads stored state from SharedPreferences/local store: '{callee}'")
 
-                if "setpurchasesupdatedlistener" in callee_lower or "purchasesupdatedlistener" in callee_lower:
-                    evidence.append("Registers PurchasesUpdatedListener callback")
+                # 3. Network interaction
+                if any(net in callee_lower for net in ["retrofit", "okhttp", "httpurlconnection", "volley"]):
+                    has_network = True
+                    evidence.append(f"Executes network call during constructor: '{callee}'")
 
-                if "sharedpreferences" in callee_lower or "getboolean" in callee_lower or "pref" in callee_lower:
-                    reads_local_state = True
-                    evidence.append("Reads local SharedPreferences for initial cached entitlement state")
+            # Check field assignments in instructions (iput / sput)
+            assigned_fields: List[str] = []
+            for inst in m.instructions:
+                if inst.opcode_name.startswith("iput") or inst.opcode_name.startswith("sput"):
+                    if inst.referenced_field:
+                        f_lower = inst.referenced_field.lower()
+                        if any(kw in f_lower for kw in ["premium", "pro", "vip", "purchased", "entitled", "is_sub"]):
+                            sets_premium = True
+                            assigned_fields.append(inst.referenced_field)
 
-                if "firebase" in callee_lower or "remoteconfig" in callee_lower or "fetchandactivate" in callee_lower:
-                    loads_remote_config = True
-                    evidence.append("Loads remote configuration / feature flags on startup")
+            if assigned_fields:
+                evidence.append(f"Directly assigns premium entitlement fields: {assigned_fields[:2]}")
 
-                if any(net in callee_lower for net in ["httpurlconnection", "okhttp", "retrofit", "volley", "execute", "enqueue"]):
-                    has_network_call = True
-                    evidence.append("Executes synchronous/asynchronous HTTP network request inside constructor")
+            if not (is_monetization_class or sets_premium or reads_local or initializes_billing):
+                continue
 
-                if any(v in callee_lower for v in ["verifypurchase", "validateentitlement", "checklicense", "querypurchases"]):
-                    is_verification = True
-                    evidence.append(f"Invokes verification/query routine: {callee}")
-
-            # Check strings referenced
-            for s in c.strings_referenced:
-                s_lower = s.lower()
-                if "is_premium" in s_lower or "pro_unlocked" in s_lower or "purchased" in s_lower:
-                    sets_premium_flags = True
-                    evidence.append(f"References entitlement key string '{s}'")
-                if "https://" in s_lower or "http://" in s_lower:
-                    has_network_call = True
-                    evidence.append(f"Contains hardcoded remote URL: {s}")
-
-            # Determine verification status (Careful: BillingClient init is NOT verification)
-            if is_verification and (has_network_call or reads_local_state):
-                verification_status = "YES"
-            elif initializes_billing_client and not is_verification and not has_network_call:
-                verification_status = "NO"
-                evidence.append("Constructor only prepares client connection without validating ownership")
-            elif not evidence:
-                verification_status = "UNKNOWN"
+            # Verification Decision:
+            # Setting BillingClient.newBuilder() is NOT verification.
+            # Only mark YES if it actually verifies entitlement via local cache or network in constructor.
+            verification = "NO"
+            if sets_premium and reads_local:
+                verification = "YES"
+                evidence.append("Constructor actively verifies and initializes premium status from local storage")
+            elif sets_premium and has_network:
+                verification = "YES"
+                evidence.append("Constructor triggers remote entitlement sync to establish premium status")
+            elif initializes_billing and not sets_premium:
+                verification = "NO"
+                evidence.append("Constructor only bootstraps the BillingClient SDK without performing entitlement verification")
+            elif sets_premium:
+                verification = "UNKNOWN"
+                evidence.append("Constructor sets premium fields with default values")
             else:
-                verification_status = "NO" if not is_verification else "YES"
+                verification = "NO"
 
-            network_status = "YES" if has_network_call else "NO"
+            network_interaction = "YES" if has_network else "NO"
+            field_name = assigned_fields[0] if assigned_fields else ""
 
-            finding = ConstructorFinding(
-                dex_file=c.dex_file,
-                class_name=c.class_name,
-                constructor_signature=c.signature,
-                verification=verification_status,
-                network_interaction=network_status,
-                initializes_billing_client=initializes_billing_client,
-                sets_premium_flags=sets_premium_flags,
-                reads_local_state=reads_local_state,
-                loads_remote_config=loads_remote_config,
-                called_methods=c.callees[:6],
-                evidence=evidence if evidence else ["Standard object lifecycle initialization"],
-                snippet=c.bytecode_snippet,
-            )
-            findings.append(finding)
+            findings.append(ConstructorFinding(
+                dex_file=m.dex_file,
+                class_name=m.class_name,
+                constructor_signature=f"{m.method_name}{m.signature}",
+                verification=verification,
+                network_interaction=network_interaction,
+                source_apk=m.source_apk,
+                initializes_billing_client=initializes_billing,
+                sets_premium_flags=sets_premium,
+                reads_local_state=reads_local,
+                loads_remote_config=loads_remote,
+                called_methods=m.callees,
+                evidence=evidence,
+                boolean_field_initialized=field_name,
+                snippet=m.bytecode_snippet,
+            ))
 
+        # Prioritize findings with verification == YES or sets_premium == True
+        findings.sort(key=lambda x: (1 if x.verification == "YES" else (2 if x.sets_premium_flags else 3)))
         return findings

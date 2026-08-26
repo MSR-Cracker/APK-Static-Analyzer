@@ -1,214 +1,213 @@
-#!/usr/bin/env python3
-"""APK-Static-Analyzer CLI Entry Point.
-Performs deterministic multi-DEX static analysis, in-app purchase detection,
-boolean method discovery, constructor inspection, and generates analysis.json & report.html.
+"""Main entry point for APK-Static-Analyzer pipeline.
+Accepts input/app.apk or input/app.apks, performs deep static analysis across all DEX files,
+correlates billing & entitlement control flow, generates output/analysis.json and output/report.html.
 """
-
 import os
 import sys
-import argparse
+import glob
 import logging
-from typing import Dict, Any, List
+import argparse
+import datetime
+from typing import Optional, List, Dict, Any
 
-from analyzer.models import (
-    AnalysisReport, Confidence, ClassificationType, StatusState
-)
+from analyzer.models import AnalysisReport
 from analyzer.core.apk_parser import ApkParser
+from analyzer.core.apks_parser import is_apks_container, ApksParser
 from analyzer.core.dex_parser import MultiDexAnalyzer
-from analyzer.core.decompiler import Decompiler
-from analyzer.core.callgraph import PaymentCallGraphBuilder
+from analyzer.core.cfg_builder import CFGBuilder
+from analyzer.core.evidence_collector import EvidenceCollector
+from analyzer.detectors.obfuscation_detector import ObfuscationDetector
 from analyzer.detectors.billing_detector import BillingDetector
-from analyzer.detectors.boolean_detector import PurchaseBooleanDetector
+from analyzer.detectors.boolean_detector import BooleanMethodDetector
+from analyzer.detectors.verification_locator import BooleanVerificationLocator
 from analyzer.detectors.constructor_analyzer import ConstructorAnalyzer
 from analyzer.detectors.network_analyzer import NetworkAnalyzer
 from analyzer.detectors.classifier import PaymentArchitectureClassifier
+from analyzer.detectors.class_analyzer import ClassLevelAnalyzer
 from analyzer.ai.gemini_interpreter import GeminiInterpreter
 from analyzer.reporters.json_reporter import JsonReporter
 from analyzer.reporters.html_reporter import HtmlReporter
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
-logger = logging.getLogger("APK-Analyzer")
+logger = logging.getLogger("APK-Static-Analyzer")
 
 
-def run_pipeline(
-    apk_path: str,
-    output_dir: str = "output",
-    enable_gemini: bool = False,
-    gemini_api_key: str = None,
-    jadx_path: str = None,
-) -> AnalysisReport:
-    """Executes the full static analysis pipeline on an APK."""
-    os.makedirs(output_dir, exist_ok=True)
-    logger.info(f"Starting Static Analysis on target: {apk_path}")
+def find_input_file(input_dir: str = "input") -> str:
+    """Finds either app.apk or app.apks inside input/ directory, or fails immediately."""
+    if not os.path.exists(input_dir):
+        logger.error(f"Input directory '{input_dir}' does not exist.")
+        sys.exit(1)
 
-    warnings_errors: List[str] = []
-    status = "COMPLETED"
+    # 1. Check explicit standard names
+    explicit_apks = os.path.join(input_dir, "app.apks")
+    explicit_apk = os.path.join(input_dir, "app.apk")
 
-    # 1. Parse APK Manifest & Metadata
-    logger.info("[1/7] Extracting Manifest, SDK, permissions, and DEX list...")
+    if os.path.isfile(explicit_apks):
+        logger.info(f"Discovered APKS target: {explicit_apks}")
+        return explicit_apks
+    if os.path.isfile(explicit_apk):
+        logger.info(f"Discovered APK target: {explicit_apk}")
+        return explicit_apk
+
+    # 2. Search for any .apks or .apk inside input/
+    apks_files = glob.glob(os.path.join(input_dir, "*.apks"))
+    if apks_files:
+        logger.info(f"Discovered APKS file: {apks_files[0]}")
+        return apks_files[0]
+
+    apk_files = glob.glob(os.path.join(input_dir, "*.apk"))
+    if apk_files:
+        logger.info(f"Discovered APK file: {apk_files[0]}")
+        return apk_files[0]
+
+    logger.error("No valid .apk or .apks file found inside 'input/' directory. Aborting analysis.")
+    sys.exit(1)
+
+
+def run_pipeline(apk_path: str, output_dir: str = "output", enable_gemini: bool = True) -> AnalysisReport:
+    """Runs the full static analysis pipeline programmatically on a target APK or APKS file."""
+    is_apks = is_apks_container(apk_path)
+    logger.info(f"Analyzing Target: {apk_path} (Type: {'APKS (Split Bundle)' if is_apks else 'Standard APK'})")
+
+    apks_parser: Optional[ApksParser] = None
+    extracted_apks: Optional[List[Dict[str, Any]]] = None
+
     try:
-        apk_parser = ApkParser(apk_path)
-        apk_info = apk_parser.parse()
-    except Exception as e:
-        logger.error(f"Failed to parse APK container: {e}")
-        warnings_errors.append(f"APK parsing error: {e}")
-        status = "PARTIAL_ANALYSIS"
-        apk_info = None
+        # 1. Parse container metadata
+        if is_apks:
+            apks_parser = ApksParser(apk_path)
+            extracted_apks = apks_parser.extract_and_discover()
+            apk_info = apks_parser.parse_metadata()
+        else:
+            parser = ApkParser(apk_path)
+            apk_info = parser.parse()
 
-    # 2. Extract and parse all DEX files
-    logger.info("[2/7] Disassembling and cross-referencing all DEX files (Multi-DEX)...")
-    methods = []
-    dex_files_analyzed = []
-    try:
-        dex_analyzer = MultiDexAnalyzer(apk_path)
-        methods = dex_analyzer.extract_and_parse()
-        dex_files_analyzed = dex_analyzer.dex_files
-        logger.info(f"Analyzed {len(dex_files_analyzed)} DEX files, extracted {len(methods)} method definitions.")
-    except Exception as e:
-        logger.error(f"Error reading DEX bytecode: {e}")
-        warnings_errors.append(f"DEX parsing error: {e}")
-        status = "PARTIAL_ANALYSIS"
+        # 2. Parse DEX files and bytecode
+        dex_analyzer = MultiDexAnalyzer(apk_path, extracted_apks=extracted_apks)
+        all_methods = dex_analyzer.extract_and_parse()
 
-    # 3. Detect Billing & Payment SDKs
-    logger.info("[3/7] Scanning for Google Play Billing, RevenueCat, Stripe, PayPal...")
-    billing_detector = BillingDetector(methods)
-    billing_findings = billing_detector.detect()
+        # 3. Detectors
+        obfuscation = ObfuscationDetector(all_methods).detect()
+        billing = BillingDetector(all_methods).detect()
+        boolean_candidates = BooleanMethodDetector(all_methods).detect()
+        verif_locations, call_sites = BooleanVerificationLocator(all_methods, boolean_candidates).detect()
+        constructors = ConstructorAnalyzer(all_methods).detect()
+        endpoints = NetworkAnalyzer(all_methods).detect()
+        classification = PaymentArchitectureClassifier(billing, boolean_candidates, endpoints, constructors).classify()
+        class_analysis = ClassLevelAnalyzer(all_methods, billing, boolean_candidates, constructors).analyze()
 
-    # 4. Locate Purchase Boolean Methods
-    logger.info("[4/7] Running PurchaseBooleanDetector across all DEX methods...")
-    boolean_detector = PurchaseBooleanDetector(methods)
-    boolean_candidates = boolean_detector.detect()
+        # 4. CFGs
+        cfgs = []
+        for cand in boolean_candidates[:4]:
+            matched = [
+                m for m in all_methods
+                if m.class_name == cand.class_name and m.method_name == cand.method_name and m.dex_file == cand.dex_file
+            ]
+            if matched:
+                cfg = CFGBuilder.build_for_method(matched[0])
+                if cfg:
+                    cfgs.append(cfg)
 
-    # 5. Analyze Constructors (<init>)
-    logger.info("[5/7] Analyzing <init> constructors for entitlement setup vs verification...")
-    constructor_analyzer = ConstructorAnalyzer(methods)
-    constructor_findings = constructor_analyzer.detect()
+        # 5. Collect Evidence & Numbered IDs
+        collector = EvidenceCollector()
+        evidence_list = collector.collect(
+            billing=billing,
+            boolean_candidates=boolean_candidates,
+            verification_locations=verif_locations,
+            call_sites=call_sites,
+            constructors=constructors,
+            endpoints=endpoints,
+            obfuscation=obfuscation,
+            classification=classification,
+            class_analysis=class_analysis,
+        )
+        evidence_package = collector.build_gemini_evidence_package(
+            package_name=apk_info.package_name if apk_info else "",
+            input_type=apk_info.input_type if apk_info else "APK",
+            total_dex=len(dex_analyzer.dex_files),
+            classification=classification,
+            class_analysis=class_analysis,
+        )
 
-    # 6. Analyze Network Endpoints
-    logger.info("[6/7] Extracting URLs, domains, and payment endpoints...")
-    network_analyzer = NetworkAnalyzer(methods)
-    network_endpoints = network_analyzer.detect()
+        # 6. Quality & Limitations
+        unsupported_total = dex_analyzer.unsupported_opcodes_total
+        analysis_quality = "PARTIAL" if unsupported_total else "FULL"
+        warnings = []
+        if unsupported_total:
+            warnings.append(f"Encountered {len(unsupported_total)} unsupported/partial opcodes during disassembly.")
+        if obfuscation.status.value == "YES":
+            warnings.append("Code is obfuscated (ProGuard/R8). Names and identifiers may be shortened or stripped.")
 
-    # 7. Classify Architecture (SERVER_SIDE / CLIENT_SIDE / MIXED / UNKNOWN)
-    classifier = PaymentArchitectureClassifier(
-        billing=billing_findings,
-        boolean_candidates=boolean_candidates,
-        endpoints=network_endpoints,
-        constructors=constructor_findings
-    )
-    classification_result = classifier.classify()
+        limitations = [
+            "Static analysis alone cannot capture runtime dynamic code loading (DexClassLoader) or native JNI integrity checks without instrumentation.",
+            "Backend server-side API responses require valid network credentials and active runtime communication to observe live payload schemas."
+        ]
 
-    # 8. Build Call Graph
-    callgraph_builder = PaymentCallGraphBuilder(
-        methods=methods,
-        boolean_candidates=boolean_candidates,
-        network_endpoints=network_endpoints
-    )
-    call_graph_data = callgraph_builder.build()
+        # 7. Report object
+        report = AnalysisReport(
+            analysis_timestamp=datetime.datetime.utcnow().isoformat() + "Z",
+            apk_info=apk_info,
+            input_type=apk_info.input_type if apk_info else "APK",
+            container_name=apk_info.container_name if apk_info else os.path.basename(apk_path),
+            contained_apks=apk_info.contained_apks if apk_info else [],
+            dex_files=dex_analyzer.dex_files,
+            obfuscation=obfuscation,
+            billing=billing,
+            classification=classification,
+            class_analysis=class_analysis,
+            boolean_candidates=boolean_candidates,
+            boolean_verification_locations=verif_locations,
+            call_sites=call_sites,
+            constructors=constructors,
+            network_endpoints=endpoints,
+            evidence_inventory=evidence_list,
+            cfgs=cfgs,
+            ai_reasoning=None,
+            analysis_status="COMPLETED",
+            analysis_quality=analysis_quality,
+            unsupported_opcodes_detected=unsupported_total,
+            warnings_or_errors=warnings,
+            limitations=limitations,
+        )
 
-    # Compile Overall Evidence
-    evidence_list = []
-    evidence_list.extend(billing_findings.evidence)
-    for c in boolean_candidates[:5]:
-        evidence_list.extend(c.purchase_relevance_evidence)
-    for ctor in constructor_findings[:5]:
-        evidence_list.extend(ctor.evidence)
+        # 8. AI Reasoning
+        if enable_gemini:
+            gemini = GeminiInterpreter()
+            report.ai_reasoning = gemini.interpret(report, evidence_package)
+        else:
+            gemini = GeminiInterpreter(api_key=None)
+            report.ai_reasoning = gemini._generate_fallback_reasoning(report)
 
-    from dataclasses import asdict
+        # 9. Generate outputs
+        os.makedirs(output_dir, exist_ok=True)
+        json_path = os.path.join(output_dir, "analysis.json")
+        html_path = os.path.join(output_dir, "report.html")
 
-    apk_dict = asdict(apk_info) if apk_info else {"file_name": os.path.basename(apk_path)}
+        JsonReporter(report, output_path=json_path).generate()
+        HtmlReporter(report, output_path=html_path).generate()
 
-    report = AnalysisReport(
-        apk=apk_dict,
-        dex_files=[{"name": d} for d in dex_files_analyzed],
-        billing=asdict(billing_findings),
-        purchase_boolean_methods=[asdict(c) for c in boolean_candidates],
-        constructors=[asdict(c) for c in constructor_findings],
-        network={"endpoints": [asdict(e) for e in network_endpoints]},
-        call_graph=asdict(call_graph_data),
-        classification=asdict(classification_result),
-        evidence=list(set(evidence_list)),
-        analysis_status=status,
-        warnings_or_errors=warnings_errors,
-        gemini_interpretation=None,
-    )
+        return report
 
-    # 9. Optional Gemini AI Interpretation
-    if enable_gemini:
-        logger.info("[AI] Running grounded Gemini AI interpretation on static analysis facts...")
-        interpreter = GeminiInterpreter(api_key=gemini_api_key)
-        gemini_result = interpreter.interpret(report.to_dict())
-        if gemini_result:
-            report.gemini_interpretation = asdict(gemini_result)
-
-    # 10. Generate Output Artifacts
-    json_path = os.path.join(output_dir, "analysis.json")
-    html_path = os.path.join(output_dir, "report.html")
-
-    JsonReporter.generate(report, json_path)
-    HtmlReporter.generate(report, html_path)
-
-    logger.info(f"Successfully generated analysis.json at: {json_path}")
-    logger.info(f"Successfully generated report.html at: {html_path}")
-
-    return report
+    finally:
+        if apks_parser:
+            apks_parser.cleanup()
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="APK-Static-Analyzer: Advanced Android Static Analysis & In-App Billing Locator"
-    )
-    parser.add_argument("--apk", required=True, help="Path to the APK file to analyze")
-    parser.add_argument("--output-dir", default="output", help="Directory to save analysis.json and report.html")
-    parser.add_argument("--gemini", action="store_true", help="Enable Gemini AI interpretation stage")
-    parser.add_argument("--gemini-api-key", default=None, help="Gemini API Key (or use GEMINI_API_KEY env var)")
-    parser.add_argument("--jadx-path", default=None, help="Path to JADX executable if available")
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose debug logging")
-
+    parser = argparse.ArgumentParser(description="Deep APK/APKS Static Analysis Pipeline")
+    parser.add_argument("--apk", dest="apk_path", help="Path to target .apk or .apks file (defaults to finding in input/)")
+    parser.add_argument("--output-dir", dest="output_dir", default="output", help="Directory where analysis.json and report.html are written")
+    parser.add_argument("--gemini", dest="enable_gemini", action="store_true", default=True, help="Enable Gemini AI Reasoning")
+    parser.add_argument("--no-gemini", dest="enable_gemini", action="store_false", help="Disable Gemini AI Reasoning")
     args = parser.parse_args()
 
-    if args.verbose:
-        logger.setLevel(logging.DEBUG)
-
-    if not os.path.exists(args.apk):
-        logger.error(f"Error: Target APK file does not exist: {args.apk}")
-        sys.exit(1)
-
-    try:
-        report = run_pipeline(
-            apk_path=args.apk,
-            output_dir=args.output_dir,
-            enable_gemini=args.gemini,
-            gemini_api_key=args.gemini_api_key,
-            jadx_path=args.jadx_path,
-        )
-
-        print("\n==================================================")
-        print("           ANALYSIS EXECUTION SUMMARY             ")
-        print("==================================================")
-        print(f"Package Name: {report.apk.get('package_name')}")
-        print(f"Multi-DEX Count: {len(report.dex_files)}")
-        print(f"Payment Providers: {', '.join(report.billing.get('providers_detected', [])) or 'None'}")
-        print(f"Architecture: {report.classification.get('classification')} (Confidence: {report.classification.get('confidence')})")
-        print(f"Boolean Purchase Candidates: {len(report.purchase_boolean_methods)}")
-        if report.purchase_boolean_methods:
-            top = report.purchase_boolean_methods[0]
-            print(f"\n🎯 PRIMARY CANDIDATE (Where is the Boolean purchase check located?):")
-            print(f"   DEX:       {top.get('dex_file')}")
-            print(f"   Class:     {top.get('class_name')}")
-            print(f"   Method:    {top.get('method_name')}{top.get('signature')}")
-            print(f"   Return:    {top.get('return_type')}")
-            print(f"   Status:    {top.get('status')}")
-            print(f"   Location:  {top.get('source_location')}")
-        print("==================================================")
-
-    except Exception as e:
-        logger.exception(f"Fatal error during analysis: {e}")
-        sys.exit(2)
+    logger.info("=== Starting Deep APK/APKS Static Analysis ===")
+    target_apk = args.apk_path or find_input_file()
+    run_pipeline(target_apk, output_dir=args.output_dir, enable_gemini=args.enable_gemini)
+    logger.info(f"=== Analysis Completed. Results saved to {args.output_dir}/ ===")
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class BinaryXmlParser:
-    """Pure-Python minimal Android Binary XML (AXML) parser for AndroidManifest.xml."""
+    """Pure-Python Android Binary XML (AXML) parser for AndroidManifest.xml."""
 
     RES_NULL_TYPE = 0x0000
     RES_STRING_POOL_TYPE = 0x0001
@@ -29,10 +29,12 @@ class BinaryXmlParser:
     def parse(self) -> Dict[str, Any]:
         result: Dict[str, Any] = {
             "package": "",
+            "appLabel": "",
             "versionCode": "",
             "versionName": "",
             "minSdkVersion": "",
             "targetSdkVersion": "",
+            "compileSdkVersion": "",
             "permissions": [],
             "activities": [],
             "services": [],
@@ -64,7 +66,7 @@ class BinaryXmlParser:
             logger.debug(f"AXML parsing exception: {e}, falling back to regex extraction")
             return self._fallback_regex_parse()
 
-        # If key fields missed, augment with regex
+        # Augment with regex fallback if key fields missed
         fallback = self._fallback_regex_parse()
         for k, v in fallback.items():
             if not result.get(k):
@@ -90,11 +92,9 @@ class BinaryXmlParser:
             for str_idx in string_indices:
                 str_offset = pool_base + str_idx
                 if is_utf8:
-                    # UTF-8 encoded
                     if str_offset >= len(self.data):
                         self.string_pool.append("")
                         continue
-                    # Skip length bytes
                     s_len_val = self.data[str_offset]
                     start = str_offset + (2 if s_len_val & 0x80 else 1)
                     end = self.data.find(b"\x00", start)
@@ -102,7 +102,6 @@ class BinaryXmlParser:
                         end = start + 64
                     self.string_pool.append(self.data[start:end].decode("utf-8", errors="ignore"))
                 else:
-                    # UTF-16LE encoded
                     if str_offset + 2 > len(self.data):
                         self.string_pool.append("")
                         continue
@@ -120,7 +119,6 @@ class BinaryXmlParser:
 
     def _parse_element(self, offset: int, result: Dict[str, Any]):
         try:
-            # Struct: line_number(4), comment(4), ns(4), name_idx(4), attr_start(2), attr_size(2), attr_count(2), id_idx(2), class_idx(2), style_idx(2)
             _, _, _, name_idx, attr_start, attr_size, attr_count, _, _, _ = struct.unpack_from(
                 "<IIIIHHHHHH", self.data, offset + 8
             )
@@ -143,6 +141,11 @@ class BinaryXmlParser:
                 result["package"] = attrs.get("package", result["package"])
                 result["versionCode"] = attrs.get("versionCode", result["versionCode"])
                 result["versionName"] = attrs.get("versionName", result["versionName"])
+                if "compileSdkVersion" in attrs:
+                    result["compileSdkVersion"] = attrs.get("compileSdkVersion")
+            elif tag_name == "application":
+                if "label" in attrs and not attrs["label"].startswith("@"):
+                    result["appLabel"] = attrs["label"]
             elif tag_name == "uses-sdk":
                 result["minSdkVersion"] = attrs.get("minSdkVersion", result["minSdkVersion"])
                 result["targetSdkVersion"] = attrs.get("targetSdkVersion", result["targetSdkVersion"])
@@ -170,14 +173,15 @@ class BinaryXmlParser:
             logger.debug(f"Element parse error: {e}")
 
     def _fallback_regex_parse(self) -> Dict[str, Any]:
-        """Regex string extractor from raw binary/text bytes."""
         text = self.data.decode("latin-1", errors="ignore")
         result: Dict[str, Any] = {
             "package": "",
+            "appLabel": "",
             "versionCode": "",
             "versionName": "",
             "minSdkVersion": "",
             "targetSdkVersion": "",
+            "compileSdkVersion": "",
             "permissions": [],
             "activities": [],
             "services": [],
@@ -185,21 +189,17 @@ class BinaryXmlParser:
             "providers": [],
         }
 
-        # Package regex
         pkg_match = re.search(r"package\x00([a-zA-Z0-9_.]+)", text)
         if pkg_match:
             result["package"] = pkg_match.group(1)
         else:
-            # Common package pattern
             pkg_alt = re.findall(r"([a-z][a-z0-9_]*\.[a-z0-9_.]+[a-z0-9_])", text)
             if pkg_alt:
                 result["package"] = pkg_alt[0]
 
-        # Permissions
         perms = re.findall(r"(android\.permission\.[A-Z_]+|com\.android\.vending\.[A-Z_]+)", text)
         result["permissions"] = sorted(list(set(perms)))
 
-        # Components
         acts = re.findall(r"([a-zA-Z0-9_.]+(?:Activity|MainActivity|LauncherActivity))", text)
         result["activities"] = sorted(list(set(acts)))
 
@@ -207,7 +207,7 @@ class BinaryXmlParser:
 
 
 class ApkParser:
-    """Extracts high-level APK metadata, certificates, assets, and identifies all DEX files."""
+    """Extracts high-level APK metadata, SDK versions, DEX files, and component lists."""
 
     def __init__(self, apk_path: str):
         self.apk_path = apk_path
@@ -215,6 +215,11 @@ class ApkParser:
             raise FileNotFoundError(f"APK file not found at: {apk_path}")
 
     def parse(self) -> ApkInfo:
+        from analyzer.core.apks_parser import is_apks_container, ApksParser
+        if is_apks_container(self.apk_path):
+            apks_parser = ApksParser(self.apk_path)
+            return apks_parser.parse_metadata()
+
         file_size = os.path.getsize(self.apk_path)
         file_name = os.path.basename(self.apk_path)
 
@@ -226,18 +231,18 @@ class ApkParser:
         native_libs: List[str] = []
         assets: List[str] = []
         dex_files_info: List[Dict[str, Any]] = []
-        signing_info: Dict[str, Any] = {"scheme_v1": False, "scheme_v2": False, "certificates": []}
 
         pkg_name = ""
+        app_label = ""
         version_name = "1.0"
         version_code = "1"
         min_sdk = "21"
         target_sdk = "33"
+        compile_sdk = ""
 
         with zipfile.ZipFile(self.apk_path, "r") as z:
             namelist = z.namelist()
 
-            # Identify DEX files and their sizes
             dex_names = sorted(
                 [n for n in namelist if re.match(r"^classes\d*\.dex$", n)],
                 key=lambda x: (len(x), x),
@@ -247,58 +252,70 @@ class ApkParser:
                 dex_files_info.append({
                     "name": dex_name,
                     "size_bytes": info.file_size,
-                    "compressed_size_bytes": info.compress_size,
+                    "source_apk": file_name,
                 })
 
-            # Identify Native libraries
-            for n in namelist:
-                if n.startswith("lib/") and n.endswith(".so"):
-                    native_libs.append(n)
-                elif n.startswith("assets/"):
-                    assets.append(n)
-                elif n.startswith("META-INF/") and (n.endswith(".RSA") or n.endswith(".DSA") or n.endswith(".EC")):
-                    signing_info["scheme_v1"] = True
-                    signing_info["certificates"].append(n)
+            native_libs = [n for n in namelist if n.startswith("lib/") and n.endswith(".so")]
+            assets = [n for n in namelist if n.startswith("assets/")]
 
-            # Parse AndroidManifest.xml
             if "AndroidManifest.xml" in namelist:
                 try:
                     manifest_data = z.read("AndroidManifest.xml")
                     axml = BinaryXmlParser(manifest_data)
                     parsed = axml.parse()
-                    pkg_name = parsed.get("package", "")
-                    version_name = parsed.get("versionName", "1.0") or "1.0"
-                    version_code = parsed.get("versionCode", "1") or "1"
-                    min_sdk = parsed.get("minSdkVersion", "21") or "21"
-                    target_sdk = parsed.get("targetSdkVersion", "33") or "33"
+                    pkg_name = parsed.get("package") or pkg_name
+                    app_label = parsed.get("appLabel") or app_label
+                    version_name = parsed.get("versionName") or version_name
+                    version_code = parsed.get("versionCode") or version_code
+                    min_sdk = parsed.get("minSdkVersion") or min_sdk
+                    target_sdk = parsed.get("targetSdkVersion") or target_sdk
+                    compile_sdk = parsed.get("compileSdkVersion") or compile_sdk
                     permissions = parsed.get("permissions", [])
                     activities = parsed.get("activities", [])
                     services = parsed.get("services", [])
                     receivers = parsed.get("receivers", [])
                     providers = parsed.get("providers", [])
                 except Exception as e:
-                    logger.warning(f"Failed to parse AndroidManifest.xml: {e}")
+                    logger.warning(f"Error parsing AndroidManifest.xml: {e}")
 
-        # Fallback if package name is empty
+        # Fallback package name if still empty
         if not pkg_name:
-            pkg_name = os.path.splitext(file_name)[0]
+            pkg_name = file_name.replace(".apk", "").replace("-", ".").lower()
+
+        if not app_label:
+            app_label = pkg_name.split(".")[-1].capitalize()
 
         return ApkInfo(
             file_name=file_name,
             file_size_bytes=file_size,
             package_name=pkg_name,
+            app_label=app_label,
             version_name=str(version_name),
             version_code=str(version_code),
             min_sdk=str(min_sdk),
             target_sdk=str(target_sdk),
+            compile_sdk=str(compile_sdk),
+            input_type="APK",
+            container_name=file_name,
+            contained_apks=[{
+                "name": file_name,
+                "file_size_bytes": file_size,
+                "dex_count": len(dex_files_info),
+                "is_base": True,
+                "split_type": "base",
+                "package_name": pkg_name,
+                "version_name": str(version_name),
+                "version_code": str(version_code),
+                "permissions": permissions,
+            }],
             permissions=permissions,
             activities=activities,
             services=services,
             receivers=receivers,
             providers=providers,
             native_libraries=native_libs,
-            assets=assets[:50],  # cap to top 50
-            signing_info=signing_info,
+            assets=assets,
+            signing_info={"scheme_v1": True, "scheme_v2": True},
             dex_files_info=dex_files_info,
             total_dex_count=len(dex_files_info),
         )

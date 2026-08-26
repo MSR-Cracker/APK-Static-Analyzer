@@ -4,6 +4,8 @@ import sys
 import struct
 import zipfile
 import argparse
+import tempfile
+import shutil
 
 
 def build_minimal_dex(class_name: str, method_name: str, ret_type: str = "Z", extra_strings: list = None) -> bytes:
@@ -163,6 +165,38 @@ def create_synthetic_apk(output_path: str):
         z.writestr("META-INF/CERT.RSA", b"CERTIFICATE_MOCK_DATA")
 
     print(f"Created synthetic test APK at: {output_path} ({os.path.getsize(output_path)} bytes)")
+
+
+def create_synthetic_apks(output_path: str):
+    """Creates a sample .apks bundle container with base-master.apk and split config APKs."""
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    temp_dir = tempfile.mkdtemp()
+    try:
+        base_apk_path = os.path.join(temp_dir, "base-master.apk")
+        split_hdpi_path = os.path.join(temp_dir, "split_hdpi.apk")
+        split_arm64_path = os.path.join(temp_dir, "split_config.arm64_v8a.apk")
+
+        create_synthetic_apk(base_apk_path)
+
+        # Minimal split APK
+        manifest_split = b"\x03\x00\x08\x00" + b"\x00" * 40 + b"package\x00com.example.targetapp\x00split\x00config.hdpi\x00"
+        dex_split = build_minimal_dex("com.example.split.SplitFeature", "initSplit", "V", ["split_loaded"])
+        with zipfile.ZipFile(split_hdpi_path, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("AndroidManifest.xml", manifest_split)
+            z.writestr("classes.dex", dex_split)
+
+        with zipfile.ZipFile(split_arm64_path, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("AndroidManifest.xml", manifest_split)
+
+        with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as z:
+            z.write(base_apk_path, "splits/base-master.apk")
+            z.write(split_hdpi_path, "splits/split_hdpi.apk")
+            z.write(split_arm64_path, "splits/split_config.arm64_v8a.apk")
+            z.writestr("toc.pb", b"TABLE_OF_CONTENTS_MOCK")
+
+        print(f"Created synthetic test APKS bundle at: {output_path} ({os.path.getsize(output_path)} bytes)")
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
