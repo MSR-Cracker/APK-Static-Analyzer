@@ -143,12 +143,15 @@ class BooleanMethodDetector(BaseDetector):
 
             confidence = Confidence.LOW
             status = StatusState.POSSIBLE
-            if score >= 6.0:
+            if score >= 4.5:
                 confidence = Confidence.HIGH
-                status = StatusState.CONFIRMED
-            elif score >= 3.5:
+                status = StatusState.STRONG_CANDIDATE
+            elif score >= 3.0:
                 confidence = Confidence.MEDIUM
                 status = StatusState.STRONG_CANDIDATE
+            else:
+                confidence = Confidence.LOW
+                status = StatusState.POSSIBLE
 
             why = "; ".join(evidence[:3]) if evidence else "Boolean gate matching entitlement criteria"
 

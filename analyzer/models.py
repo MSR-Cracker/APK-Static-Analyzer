@@ -18,10 +18,10 @@ class ClassificationType(str, Enum):
 
 
 class StatusState(str, Enum):
-    CONFIRMED = "Confirmed"
-    STRONG_CANDIDATE = "Strong candidate"
-    POSSIBLE = "Possible"
-    NOT_FOUND = "Not found"
+    CONFIRMED = "CONFIRMED"
+    STRONG_CANDIDATE = "STRONG_CANDIDATE"
+    POSSIBLE = "POSSIBLE"
+    NOT_FOUND = "NOT_FOUND"
 
 
 class ObfuscationStatus(str, Enum):

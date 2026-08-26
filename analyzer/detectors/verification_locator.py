@@ -1,168 +1,173 @@
-"""Boolean Verification & Call Site Locator: Traces data flow from boolean calls to conditionals across all DEX files."""
+"""Boolean Verification Locator: Traces invoke-* call sites, move-result data flow, and conditional branch gating."""
 from typing import List, Dict, Set, Tuple, Optional
 from analyzer.models import (
-    DexMethod, BooleanMethodCandidate, BooleanVerificationLocation, CallSiteFinding
+    DexMethod, BooleanMethodCandidate, BooleanVerificationLocation,
+    CallSiteFinding, StatusState, InstructionDetail
 )
 from analyzer.detectors.base import BaseDetector
 
 
 class BooleanVerificationLocator(BaseDetector):
-    """Traces invoke-* -> move-result vX -> if-* branch flows to map gating locations."""
+    """Deep cross-DEX control-flow and data-flow locator for boolean verification call sites."""
 
     def __init__(self, methods: List[DexMethod], candidates: List[BooleanMethodCandidate]):
         super().__init__(methods)
         self.candidates = candidates
 
     def detect(self) -> Tuple[List[BooleanVerificationLocation], List[CallSiteFinding]]:
-        verifications: List[BooleanVerificationLocation] = []
+        verification_locations: List[BooleanVerificationLocation] = []
         call_sites: List[CallSiteFinding] = []
 
-        # Map candidate identifiers
-        candidate_map: Dict[str, BooleanMethodCandidate] = {}
-        for c in self.candidates:
-            candidate_map[f"{c.class_name}->{c.method_name}"] = c
-            candidate_map[f"{c.class_name}.{c.method_name}"] = c
-            candidate_map[f"{c.class_name}->{c.method_name}{c.signature}"] = c
+        if not self.candidates or not self.methods:
+            return [], []
 
+        # Index candidates by matching keys (canonical signature and simple name)
+        cand_map: Dict[str, BooleanMethodCandidate] = {}
+        for cand in self.candidates:
+            cand_map[f"{cand.class_name}->{cand.method_name}{cand.signature}"] = cand
+            cand_map[f"{cand.class_name}->{cand.method_name}"] = cand
+
+        # Iterate through every method and its disassembled instructions
         for caller_m in self.methods:
-            if not caller_m.instructions:
+            instructions = caller_m.instructions
+            if not instructions:
                 continue
 
-            instructions = caller_m.instructions
             for idx, inst in enumerate(instructions):
-                # Look for invocations of boolean candidates
-                if not inst.opcode_name.startswith("invoke-"):
+                # Check for invocation opcodes (invoke-virtual, direct, static, super, interface, range)
+                if not (inst.opcode in (0x6E, 0x6F, 0x70, 0x71, 0x72) or inst.opcode in (0x74, 0x75, 0x76, 0x77, 0x78)):
                     continue
 
-                target_ref = inst.referenced_method or ""
-                target_base = target_ref.split("(")[0]
-
-                cand = candidate_map.get(target_ref) or candidate_map.get(target_base)
-                if not cand:
-                    # Also check if target_ref matches method_name of a candidate on same class
-                    for c in self.candidates:
-                        if c.class_name in target_ref and f"->{c.method_name}" in target_ref:
-                            cand = c
-                            break
-
-                if not cand:
+                if not inst.referenced_method:
                     continue
 
-                # We found a call site!
-                call_offset = inst.offset
-                args = inst.registers
+                # Match against candidates
+                target_cand = None
+                if inst.referenced_method in cand_map:
+                    target_cand = cand_map[inst.referenced_method]
+                else:
+                    base_ref = inst.referenced_method.split("(")[0]
+                    if base_ref in cand_map:
+                        target_cand = cand_map[base_ref]
 
-                # Look ahead for move-result
-                result_reg: Optional[str] = None
-                branch_opcode: Optional[str] = None
-                branch_inst = None
-                following_lines: List[str] = []
+                if not target_cand:
+                    continue
 
-                # Scan up to 8 instructions following the invocation
-                for lookahead in range(1, min(9, len(instructions) - idx)):
-                    next_inst = instructions[idx + lookahead]
-                    following_lines.append(f"0x{next_inst.offset:04x}: {next_inst.opcode_name} {next_inst.operands}")
+                # We found a verified call site!
+                caller_sig = f"{caller_m.class_name}->{caller_m.method_name}{caller_m.signature}"
+                if caller_sig not in target_cand.callers:
+                    target_cand.callers.append(caller_sig)
 
-                    if next_inst.opcode_name in ("move-result", "move-result/from16", "move-result/16"):
-                        if not result_reg:
-                            result_reg = next_inst.registers[0] if next_inst.registers else "v0"
+                # Data-flow analysis: Trace return value register
+                move_result_reg: Optional[str] = None
+                following_insts: List[str] = []
+                conditional_branch: Optional[str] = None
+                branch_offset: Optional[int] = None
+                true_target: str = ""
+                false_target: str = ""
+                true_effect: str = "UNKNOWN"
+                false_effect: str = "UNKNOWN"
+                effect_summary: str = ""
 
-                    elif next_inst.opcode_name.startswith("if-"):
-                        # Check if conditional tests our result_reg
-                        if result_reg and result_reg in next_inst.registers:
-                            branch_opcode = next_inst.opcode_name
-                            branch_inst = next_inst
+                # Look at immediate and subsequent instructions
+                tracked_regs: Set[str] = set()
+
+                for f_idx in range(idx + 1, min(idx + 8, len(instructions))):
+                    f_inst = instructions[f_idx]
+                    following_insts.append(f"0x{f_inst.offset:04x}: {f_inst.opcode_name} {f_inst.operands}")
+
+                    # Step 1: Capture move-result
+                    if f_idx == idx + 1 and f_inst.opcode in (0x0A, 0x0B, 0x0C):
+                        move_result_reg = f_inst.operands.strip()
+                        tracked_regs.add(move_result_reg)
+                        continue
+
+                    # Step 2: Track register moves (aliases)
+                    if f_inst.opcode in (0x01, 0x02, 0x03) and len(f_inst.registers) >= 2:
+                        dst_reg, src_reg = f_inst.registers[0], f_inst.registers[1]
+                        if src_reg in tracked_regs:
+                            tracked_regs.add(dst_reg)
+
+                    # Step 3: Check conditional branches testing tracked register
+                    if f_inst.opcode_name.startswith("if-") and (not conditional_branch):
+                        has_tracked_reg = any(r in tracked_regs for r in f_inst.registers) if tracked_regs else (f_idx <= idx + 2)
+                        if has_tracked_reg or f_idx <= idx + 2:
+                            conditional_branch = f_inst.opcode_name
+                            branch_offset = f_inst.offset
+
+                            if f_inst.branch_target is not None:
+                                true_target = f"0x{f_inst.branch_target:04x}"
+                            fallthrough_off = f_inst.offset + 2
+                            false_target = f"0x{fallthrough_off:04x}"
+
+                            # Semantics of Dalvik if-eqz vs if-nez
+                            if f_inst.opcode == 0x38:  # if-eqz vX (if vX == 0 / false)
+                                true_effect = "Paywall / Feature Locked (v==0)"
+                                false_effect = "Premium / Unlocked Feature Path (v!=0)"
+                                effect_summary = f"Gating: if {move_result_reg or 'result'} is FALSE, jumps to {true_target} (Lock/Paywall); otherwise proceeds to unlocked feature path."
+                            elif f_inst.opcode == 0x39:  # if-nez vX (if vX != 0 / true)
+                                true_effect = "Premium / Unlocked Feature Path (v!=0)"
+                                false_effect = "Paywall / Feature Locked (v==0)"
+                                effect_summary = f"Gating: if {move_result_reg or 'result'} is TRUE, jumps to {true_target} (Unlocked Feature); otherwise falls through to Paywall/Lock."
+                            else:
+                                true_effect = f"Branch condition met -> {true_target}"
+                                false_effect = f"Branch condition not met -> {false_target}"
+                                effect_summary = f"Conditional branch {f_inst.opcode_name} on {', '.join(f_inst.registers)}"
                             break
-                        elif not result_reg and lookahead <= 2:
-                            # Direct test
-                            branch_opcode = next_inst.opcode_name
-                            branch_inst = next_inst
-                            result_reg = next_inst.registers[0] if next_inst.registers else "v0"
-                            break
 
-                # Determine branch targets and effects
-                true_target_str = "UNKNOWN"
-                false_target_str = "UNKNOWN"
-                true_effect = "UNKNOWN"
-                false_effect = "UNKNOWN"
-                effect_summary = f"Direct gate check on {cand.method_name}()"
-                evidence: List[str] = []
-
-                if branch_inst and branch_inst.branch_target is not None:
-                    taken_target = branch_inst.branch_target
-                    fallthrough_target = instructions[idx + lookahead + 1].offset if (idx + lookahead + 1 < len(instructions)) else branch_inst.offset + 2
-
-                    true_target_str = f"0x{taken_target:04x}"
-                    false_target_str = f"0x{fallthrough_target:04x}"
-
-                    # Semantic effect analysis on branches
-                    # if-nez (branch taken when != 0 / TRUE)
-                    # if-eqz (branch taken when == 0 / FALSE)
-                    if branch_opcode == "if-nez":
-                        true_effect = "Condition TRUE: executes branch target (Premium feature path)"
-                        false_effect = "Condition FALSE: fallthrough to lock / paywall path"
-                        effect_summary = f"Validates '{cand.method_name}() == true' -> unlocks feature path at 0x{taken_target:04x}"
-                    elif branch_opcode == "if-eqz":
-                        true_effect = "Condition FALSE: jumps to locked / paywall / exit handler"
-                        false_effect = "Condition TRUE: fallthrough unlocks premium feature path"
-                        effect_summary = f"Checks '{cand.method_name}() == false' -> jumps to paywall handler at 0x{taken_target:04x}"
-                    else:
-                        true_effect = f"Branch taken to 0x{taken_target:04x}"
-                        false_effect = f"Fallthrough to 0x{fallthrough_target:04x}"
-
-                    evidence.append(f"Result register '{result_reg}' evaluated with '{branch_opcode}' at offset 0x{branch_inst.offset:04x}")
-                    evidence.append(f"Taken Target: {true_target_str} ({true_effect})")
-                    evidence.append(f"Fallthrough Target: {false_target_str} ({false_effect})")
-
-                snippet_lines = [f"0x{inst.offset:04x}: {inst.opcode_name} {inst.operands}"] + following_lines
-                snippet_text = "\n".join(snippet_lines)
-
-                # Record Call Site Finding
-                cs = CallSiteFinding(
+                # Create CallSiteFinding
+                cs_finding = CallSiteFinding(
                     caller_class=caller_m.class_name,
                     caller_method=caller_m.method_name,
                     caller_signature=caller_m.signature,
                     dex_file=caller_m.dex_file,
                     source_apk=caller_m.source_apk,
-                    instruction_offset=call_offset,
-                    called_class=cand.class_name,
-                    called_method=cand.method_name,
-                    called_signature=cand.signature,
-                    arguments=args,
-                    move_result_register=result_reg,
-                    following_instructions=following_lines,
-                    conditional_branch=branch_opcode,
-                    branch_offset=branch_inst.offset if branch_inst else None,
-                    true_branch_target=true_target_str,
-                    false_branch_target=false_target_str,
+                    instruction_offset=inst.offset,
+                    called_class=target_cand.class_name,
+                    called_method=target_cand.method_name,
+                    called_signature=target_cand.signature,
+                    arguments=inst.registers,
+                    move_result_register=move_result_reg,
+                    following_instructions=following_insts,
+                    conditional_branch=conditional_branch,
+                    branch_offset=branch_offset,
+                    true_branch_target=true_target,
+                    false_branch_target=false_target,
                     true_branch_effect=true_effect,
                     false_branch_effect=false_effect,
                     effect_summary=effect_summary,
-                    bytecode_snippet=snippet_text,
+                    bytecode_snippet=caller_m.bytecode_snippet or "",
                 )
-                call_sites.append(cs)
+                call_sites.append(cs_finding)
 
-                # If a conditional branch was located, record as a Verification Location
-                if branch_opcode and result_reg:
-                    verif = BooleanVerificationLocation(
+                # If a conditional branch was located, create a BooleanVerificationLocation
+                if conditional_branch and branch_offset is not None:
+                    verif_loc = BooleanVerificationLocation(
                         dex_file=caller_m.dex_file,
                         source_apk=caller_m.source_apk,
                         class_name=caller_m.class_name,
                         method_name=caller_m.method_name,
                         method_signature=caller_m.signature,
-                        called_boolean_method=cand.method_name,
-                        called_boolean_class=cand.class_name,
-                        instruction_offset=call_offset,
-                        branch_opcode=branch_opcode,
-                        result_register=result_reg,
-                        true_branch_target=true_target_str,
-                        false_branch_target=false_target_str,
+                        called_boolean_method=target_cand.method_name,
+                        called_boolean_class=target_cand.class_name,
+                        instruction_offset=inst.offset,
+                        branch_opcode=conditional_branch,
+                        result_register=move_result_reg or "v0",
+                        true_branch_target=true_target,
+                        false_branch_target=false_target,
                         true_branch_effect=true_effect,
                         false_branch_effect=false_effect,
                         effect=effect_summary,
-                        evidence=evidence,
-                        bytecode_snippet=snippet_text,
+                        evidence=[
+                            f"Invokes boolean check '{target_cand.class_name}->{target_cand.method_name}' at offset 0x{inst.offset:04x}",
+                            f"Captures return value in register '{move_result_reg or 'vX'}'",
+                            f"Evaluates access condition using '{conditional_branch}' at offset 0x{branch_offset:04x}",
+                            f"Path bifurcation: True -> {true_target} ({true_effect}); False -> {false_target} ({false_effect})",
+                        ],
+                        bytecode_snippet=caller_m.bytecode_snippet or "",
                     )
-                    verifications.append(verif)
+                    verification_locations.append(verif_loc)
+                    # UPGRADE candidate to CONFIRMED since verified call site with branch gating exists!
+                    target_cand.status = StatusState.CONFIRMED
 
-        return verifications, call_sites
+        return verification_locations, call_sites

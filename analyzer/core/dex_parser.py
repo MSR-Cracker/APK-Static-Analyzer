@@ -443,17 +443,10 @@ class DexParser:
                 _, cur = read_uleb128(self.data, cur)
                 _, cur = read_uleb128(self.data, cur)
 
-            self._parse_method_list(cur, direct_methods_size, clean_class, package_name, source_file)
-            
-            cur_virtual = cur
-            for _ in range(direct_methods_size):
-                _, cur_virtual = read_uleb128(self.data, cur_virtual)
-                _, cur_virtual = read_uleb128(self.data, cur_virtual)
-                _, cur_virtual = read_uleb128(self.data, cur_virtual)
+            cur = self._parse_methods(cur, direct_methods_size, clean_class, package_name, source_file)
+            cur = self._parse_methods(cur, virtual_methods_size, clean_class, package_name, source_file)
 
-            self._parse_method_list(cur_virtual, virtual_methods_size, clean_class, package_name, source_file)
-
-    def _parse_method_list(self, offset: int, count: int, class_name: str, package_name: str, source_file: Optional[str]):
+    def _parse_methods(self, offset: int, count: int, class_name: str, package_name: str, source_file: Optional[str]) -> int:
         cur = offset
         method_idx = 0
         for _ in range(count):
@@ -542,6 +535,7 @@ class DexParser:
                 analysis_quality=analysis_quality,
             )
             self.methods.append(method_obj)
+        return cur
 
     def _disassemble_bytecode(
         self, insns: bytes, class_name: str, method_name: str
@@ -984,13 +978,6 @@ class MultiDexAnalyzer:
                         ))
 
                         self.dex_strings[dex_key] = parser.strings
-
-                        for m in methods:
-                            if not m.strings_referenced:
-                                m.strings_referenced = [
-                                    s for s in parser.strings
-                                    if "http" in s or "purchase" in s.lower() or "premium" in s.lower() or "billing" in s.lower() or "entitlement" in s.lower()
-                                ]
                         self.all_methods.extend(methods)
             except Exception as e:
                 logger.error(f"Error parsing APK {apk_label} ({apk_file_path}): {e}")
@@ -1002,22 +989,24 @@ class MultiDexAnalyzer:
         """Cross-references callees to populate callers for all methods across all DEX files and split APKs."""
         method_map: Dict[str, DexMethod] = {}
         for m in self.all_methods:
-            key1 = f"{m.class_name}->{m.method_name}"
-            key2 = f"{m.class_name}.{m.method_name}"
-            key3 = f"{m.class_name}->{m.method_name}{m.signature}"
-            method_map[key1] = m
-            method_map[key2] = m
-            method_map[key3] = m
+            # Map canonical representations: exact signature and base name
+            key_sig = f"{m.class_name}->{m.method_name}{m.signature}"
+            key_base = f"{m.class_name}->{m.method_name}"
+            method_map[key_sig] = m
+            if key_base not in method_map:
+                method_map[key_base] = m
 
         for m in self.all_methods:
-            caller_repr = f"{m.class_name}->{m.method_name}()"
+            caller_repr = f"{m.class_name}->{m.method_name}{m.signature}"
             for callee in m.callees:
-                callee_base = callee.split("(")[0]
                 if callee in method_map:
                     target_m = method_map[callee]
                     if caller_repr not in target_m.callers:
                         target_m.callers.append(caller_repr)
-                elif callee_base in method_map:
-                    target_m = method_map[callee_base]
-                    if caller_repr not in target_m.callers:
+                else:
+                    callee_base = callee.split("(")[0]
+                    if callee_base in method_map:
+                        target_m = method_map[callee_base]
+                        if caller_repr not in target_m.callers:
+                            target_m.callers.append(caller_repr)
                         target_m.callers.append(caller_repr)

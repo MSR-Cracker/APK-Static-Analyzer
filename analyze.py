@@ -8,7 +8,7 @@ import glob
 import logging
 import argparse
 import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set
 
 from analyzer.models import AnalysisReport
 from analyzer.core.apk_parser import ApkParser
@@ -96,20 +96,41 @@ def run_pipeline(apk_path: str, output_dir: str = "output", enable_gemini: bool 
         verif_locations, call_sites = BooleanVerificationLocator(all_methods, boolean_candidates).detect()
         constructors = ConstructorAnalyzer(all_methods).detect()
         endpoints = NetworkAnalyzer(all_methods).detect()
-        classification = PaymentArchitectureClassifier(billing, boolean_candidates, endpoints, constructors).classify()
+        classification = PaymentArchitectureClassifier(
+            billing=billing,
+            boolean_candidates=boolean_candidates,
+            endpoints=endpoints,
+            constructors=constructors,
+            verification_locations=verif_locations,
+            call_sites=call_sites,
+        ).classify()
         class_analysis = ClassLevelAnalyzer(all_methods, billing, boolean_candidates, constructors).analyze()
 
         # 4. CFGs
         cfgs = []
-        for cand in boolean_candidates[:4]:
-            matched = [
-                m for m in all_methods
-                if m.class_name == cand.class_name and m.method_name == cand.method_name and m.dex_file == cand.dex_file
-            ]
-            if matched:
-                cfg = CFGBuilder.build_for_method(matched[0])
-                if cfg:
-                    cfgs.append(cfg)
+        cfg_sigs: Set[str] = set()
+        
+        # Build CFG for methods with verification locations / call sites
+        for vl in verif_locations:
+            for m in all_methods:
+                if m.class_name == vl.class_name and m.method_name == vl.method_name and m.signature == vl.method_signature:
+                    sig = f"{m.class_name}->{m.method_name}{m.signature}"
+                    if sig not in cfg_sigs:
+                        cfg = CFGBuilder.build_for_method(m)
+                        if cfg:
+                            cfgs.append(cfg)
+                            cfg_sigs.add(sig)
+
+        # Build CFG for boolean candidates with bytecode
+        for cand in boolean_candidates[:6]:
+            for m in all_methods:
+                if m.class_name == cand.class_name and m.method_name == cand.method_name and m.dex_file == cand.dex_file:
+                    sig = f"{m.class_name}->{m.method_name}{m.signature}"
+                    if sig not in cfg_sigs:
+                        cfg = CFGBuilder.build_for_method(m)
+                        if cfg:
+                            cfgs.append(cfg)
+                            cfg_sigs.add(sig)
 
         # 5. Collect Evidence & Numbered IDs
         collector = EvidenceCollector()
@@ -134,10 +155,17 @@ def run_pipeline(apk_path: str, output_dir: str = "output", enable_gemini: bool 
 
         # 6. Quality & Limitations
         unsupported_total = dex_analyzer.unsupported_opcodes_total
-        analysis_quality = "PARTIAL" if unsupported_total else "FULL"
-        warnings = []
-        if unsupported_total:
-            warnings.append(f"Encountered {len(unsupported_total)} unsupported/partial opcodes during disassembly.")
+        methods_with_code = [m for m in all_methods if m.instructions]
+        if not methods_with_code and all_methods:
+            analysis_quality = "LIMITED"
+            warnings = ["DEX files contain class definitions without parsed bytecode instructions or code items."]
+        elif unsupported_total:
+            analysis_quality = "PARTIAL"
+            warnings = [f"Encountered {len(unsupported_total)} unsupported/partial opcodes during disassembly."]
+        else:
+            analysis_quality = "FULL"
+            warnings = []
+
         if obfuscation.status.value == "YES":
             warnings.append("Code is obfuscated (ProGuard/R8). Names and identifiers may be shortened or stripped.")
 
