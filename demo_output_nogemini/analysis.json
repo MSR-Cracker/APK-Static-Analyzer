@@ -1,0 +1,157 @@
+{
+  "apk": {
+    "file_name": "demo.apk",
+    "file_size_bytes": 1421,
+    "package_name": "com.example.targetapp",
+    "version_name": "1.0",
+    "version_code": "1",
+    "min_sdk": "21",
+    "target_sdk": "33",
+    "permissions": [
+      "android.permission.INTERNET",
+      "com.android.vending.BILLING"
+    ],
+    "activities": [
+      "com.example.app.MainActivity"
+    ],
+    "services": [],
+    "receivers": [],
+    "providers": [],
+    "native_libraries": [],
+    "assets": [],
+    "signing_info": {
+      "scheme_v1": true,
+      "scheme_v2": false,
+      "certificates": [
+        "META-INF/CERT.RSA"
+      ]
+    },
+    "dex_files_info": [
+      {
+        "name": "classes.dex",
+        "size_bytes": 369,
+        "compressed_size_bytes": 225
+      },
+      {
+        "name": "classes2.dex",
+        "size_bytes": 412,
+        "compressed_size_bytes": 248
+      },
+      {
+        "name": "classes3.dex",
+        "size_bytes": 470,
+        "compressed_size_bytes": 279
+      }
+    ],
+    "total_dex_count": 3
+  },
+  "dex_files": [
+    {
+      "name": "classes.dex"
+    },
+    {
+      "name": "classes2.dex"
+    },
+    {
+      "name": "classes3.dex"
+    }
+  ],
+  "billing": {
+    "providers_detected": [
+      "Google Play Billing"
+    ],
+    "features_detected": [
+      "Play Billing (BillingClient)",
+      "Play Billing (Purchase)",
+      "Play Billing (com.android.billingclient)",
+      "Play Billing (queryPurchases)",
+      "Play Billing (queryPurchasesAsync)"
+    ],
+    "billing_classes": [
+      "com.android.billingclient.api.BillingClient",
+      "com.example.billing.PurchaseManager"
+    ],
+    "billing_methods": [
+      "com.android.billingclient.api.BillingClient-><init>",
+      "com.android.billingclient.api.BillingClient->queryPurchasesAsync",
+      "com.example.billing.PurchaseManager-><init>",
+      "com.example.billing.PurchaseManager->isPurchased"
+    ],
+    "has_play_billing": true,
+    "has_revenuecat": false,
+    "has_stripe": false,
+    "has_paypal": false,
+    "has_webview_payment": false,
+    "has_custom_billing": false,
+    "evidence": []
+  },
+  "purchase_boolean_methods": [
+    {
+      "dex_file": "classes3.dex",
+      "class_name": "com.example.billing.PurchaseManager",
+      "package": "com.example.billing",
+      "method_name": "isPurchased",
+      "signature": "()Z",
+      "return_type": "boolean",
+      "parameters": [],
+      "access_flags": [
+        "public"
+      ],
+      "is_static": false,
+      "is_native": false,
+      "is_abstract": false,
+      "is_constructor": false,
+      "source_location": "()V",
+      "callers": [],
+      "callees": [],
+      "confidence": "High",
+      "status": "Confirmed",
+      "purchase_relevance_evidence": [
+        "Method name 'isPurchased' explicitly matches purchase keyword 'ispurchased'",
+        "Enclosing class 'com.example.billing.PurchaseManager' is related to billing domain ('billing')",
+        "Parameterless signature ()Z suitable for global entitlement status query"
+      ],
+      "score": 6.8,
+      "decompiled_snippet": null
+    }
+  ],
+  "constructors": [
+    {
+      "dex_file": "classes2.dex",
+      "class_name": "com.android.billingclient.api.BillingClient",
+      "constructor_signature": "()V",
+      "verification": "UNKNOWN",
+      "network_interaction": "NO",
+      "initializes_billing_client": false,
+      "sets_premium_flags": false,
+      "reads_local_state": false,
+      "loads_remote_config": false,
+      "called_methods": [],
+      "evidence": [
+        "Standard object lifecycle initialization"
+      ],
+      "snippet": null
+    },
+    {
+      "dex_file": "classes3.dex",
+      "class_name": "com.example.billing.PurchaseManager",
+      "constructor_signature": "()V",
+      "verification": "UNKNOWN",
+      "network_interaction": "NO",
+      "initializes_billing_client": false,
+      "sets_premium_flags": false,
+      "reads_local_state": false,
+      "loads_remote_config": false,
+      "called_methods": [],
+      "evidence": [
+        "Standard object lifecycle initialization"
+      ],
+      "snippet": null
+    }
+  ],
+  "network": {
+    "endpoints": []
+  },
+  "call_graph": {
+    "nodes": [
+      

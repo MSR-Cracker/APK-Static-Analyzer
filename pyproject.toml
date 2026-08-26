@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apk-static-analyzer"
+version = "1.0.0"
+description = "Static analysis tool and GitHub Action for Android reverse engineering & in-app purchase verification detection."
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "google-genai>=2.4.0",
+    "jinja2>=3.1.2",
+]
+
+[project.scripts]
+apk-analyze = "analyze:main"
