@@ -78,12 +78,8 @@ class ClassLevelAnalyzer:
     ):
         self.methods = methods or []
         self.billing = billing
-        self.boolean_candidates = (
-            boolean_candidates or []
-        )
-        self.constructors = (
-            constructors or []
-        )
+        self.boolean_candidates = boolean_candidates or []
+        self.constructors = constructors or []
 
     # ------------------------------------------------------------------
     # Helpers
@@ -105,9 +101,7 @@ class ClassLevelAnalyzer:
         value: str,
         keywords,
     ) -> bool:
-        text = (
-            value or ""
-        ).lower()
+        text = (value or "").lower()
 
         return any(
             keyword in text
@@ -139,12 +133,8 @@ class ClassLevelAnalyzer:
             self._candidate_status_rank(
                 candidate.status
             ),
-            -float(
-                candidate.score
-            ),
-            -len(
-                candidate.callers or []
-            ),
+            -float(candidate.score),
+            -len(candidate.callers or []),
             candidate.class_name.lower(),
             candidate.method_name.lower(),
             candidate.dex_file.lower(),
@@ -168,10 +158,7 @@ class ClassLevelAnalyzer:
         scores: Dict[str, float],
         evidence: List[str],
     ) -> None:
-        for class_name in (
-            self.billing.billing_classes
-            or []
-        ):
+        for class_name in self.billing.billing_classes or []:
             if not class_name:
                 continue
 
@@ -201,21 +188,15 @@ class ClassLevelAnalyzer:
         premium_scores: Dict[str, float],
         evidence: List[str],
     ) -> None:
-        for candidate in (
-            self.boolean_candidates
-        ):
-            class_name = (
-                candidate.class_name
-            )
+        for candidate in self.boolean_candidates:
+            class_name = candidate.class_name
 
             if not class_name:
                 continue
 
             score = max(
                 0.0,
-                float(
-                    candidate.score
-                ),
+                float(candidate.score),
             )
 
             # Primary source of class-level relevance.
@@ -310,19 +291,13 @@ class ClassLevelAnalyzer:
         premium_scores: Dict[str, float],
         evidence: List[str],
     ) -> None:
-        for constructor in (
-            self.constructors
-        ):
-            class_name = (
-                constructor.class_name
-            )
+        for constructor in self.constructors:
+            class_name = constructor.class_name
 
             if not class_name:
                 continue
 
-            if (
-                constructor.initializes_billing_client
-            ):
+            if constructor.initializes_billing_client:
                 self._add_score(
                     purchase_scores,
                     class_name,
@@ -355,10 +330,7 @@ class ClassLevelAnalyzer:
                     1.5,
                 )
 
-            if (
-                constructor.verification
-                == "YES"
-            ):
+            if constructor.verification == "YES":
                 self._add_score(
                     purchase_scores,
                     class_name,
@@ -387,27 +359,18 @@ class ClassLevelAnalyzer:
     ) -> None:
         billing_method_names = {
             value.lower()
-            for value in (
-                self.billing.billing_methods
-                or []
-            )
+            for value in (self.billing.billing_methods or [])
         }
 
         for method_repr in billing_method_names:
             class_name = (
-                method_repr.split(
-                    "->",
-                    1,
-                )[0]
+                method_repr.split("->", 1)[0]
                 if "->" in method_repr
                 else ""
             )
 
             method_name = (
-                method_repr.split(
-                    "->",
-                    1,
-                )[1]
+                method_repr.split("->", 1)[1]
                 if "->" in method_repr
                 else method_repr
             )
@@ -445,9 +408,7 @@ class ClassLevelAnalyzer:
         per_class_method_hits = defaultdict(int)
 
         for method in self.methods:
-            class_name = (
-                method.class_name
-            )
+            class_name = method.class_name
 
             if not class_name:
                 continue
@@ -456,13 +417,9 @@ class ClassLevelAnalyzer:
                 method.method_name,
                 self.BILLING_METHOD_KEYWORDS,
             ):
-                per_class_method_hits[
-                    class_name
-                ] += 1
+                per_class_method_hits[class_name] += 1
 
-        for class_name, count in (
-            per_class_method_hits.items()
-        ):
+        for class_name, count in per_class_method_hits.items():
             self._add_score(
                 purchase_scores,
                 class_name,
@@ -476,9 +433,11 @@ class ClassLevelAnalyzer:
                 class_name,
                 self.PREMIUM_KEYWORDS,
             ):
+                # FIX: _add_score requires an explicit amount.
                 self._add_score(
                     premium_scores,
                     class_name,
+                    2.0,
                 )
 
     # ------------------------------------------------------------------
@@ -528,9 +487,7 @@ class ClassLevelAnalyzer:
         self,
         primary_purchase: Optional[str],
         primary_premium: Optional[str],
-        primary_boolean: Optional[
-            BooleanMethodCandidate
-        ],
+        primary_boolean: Optional[BooleanMethodCandidate],
         purchase_scores: Dict[str, float],
         premium_scores: Dict[str, float],
     ) -> Confidence:
@@ -538,30 +495,21 @@ class ClassLevelAnalyzer:
         if not primary_boolean:
             return Confidence.LOW
 
-        if (
-            primary_boolean.status
-            == StatusState.CONFIRMED
-        ):
+        if primary_boolean.status == StatusState.CONFIRMED:
             return Confidence.HIGH
 
-        boolean_score = (
-            float(
-                primary_boolean.score
-            )
+        boolean_score = float(
+            primary_boolean.score
         )
 
-        purchase_score = (
-            purchase_scores.get(
-                primary_purchase or "",
-                0.0,
-            )
+        purchase_score = purchase_scores.get(
+            primary_purchase or "",
+            0.0,
         )
 
-        premium_score = (
-            premium_scores.get(
-                primary_premium or "",
-                0.0,
-            )
+        premium_score = premium_scores.get(
+            primary_premium or "",
+            0.0,
         )
 
         if (
@@ -588,20 +536,12 @@ class ClassLevelAnalyzer:
     # Main analysis
     # ------------------------------------------------------------------
 
-    def analyze(
-        self,
-    ) -> ClassLevelAnalysis:
+    def analyze(self) -> ClassLevelAnalysis:
         evidence: List[str] = []
 
-        purchase_class_scores: Dict[
-            str,
-            float,
-        ] = defaultdict(float)
+        purchase_class_scores: Dict[str, float] = defaultdict(float)
 
-        premium_class_scores: Dict[
-            str,
-            float,
-        ] = defaultdict(float)
+        premium_class_scores: Dict[str, float] = defaultdict(float)
 
         # --------------------------------------------------------------
         # Score all independent evidence sources.
@@ -726,9 +666,7 @@ class ClassLevelAnalyzer:
         # --------------------------------------------------------------
 
         evidence = list(
-            dict.fromkeys(
-                evidence
-            )
+            dict.fromkeys(evidence)
         )
 
         return ClassLevelAnalysis(
