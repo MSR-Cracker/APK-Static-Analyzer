@@ -7,6 +7,7 @@ jobs:
   analyze:
     name: "Perform Deep Static Analysis"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: "Checkout Repository"
@@ -21,62 +22,200 @@ jobs:
       - name: "Install Python Dependencies"
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
 
       - name: "Validate Target Input File"
         run: |
           mkdir -p input
-          if [ ! -f "input/app.apk" ] && [ ! -f "input/app.apks" ] && [ -z "$(ls -A input/*.apk input/*.apks 2>/dev/null)" ]; then
-            echo "::error ::No APK or APKS target found in input/ directory. Please place input/app.apk or input/app.apks before running."
+
+          TARGET=""
+
+          if [ -f "input/app.apks" ]; then
+            TARGET="input/app.apks"
+          elif [ -f "input/app.apk" ]; then
+            TARGET="input/app.apk"
+          else
+            TARGET=$(find input -maxdepth 1 -type f \( -iname "*.apk" -o -iname "*.apks" \) | head -n 1 || true)
+          fi
+
+          if [ -z "$TARGET" ]; then
+            echo "::error ::No APK or APKS target found in input/."
+            echo "Expected input/app.apk or input/app.apks."
             exit 1
           fi
-          echo "Target input file confirmed."
+
+          echo "Target input file confirmed:"
+          echo "$TARGET"
+
+          echo "File information:"
+          ls -lh "$TARGET"
 
       - name: "Run Deep Static Analysis Pipeline"
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PYTHONUNBUFFERED: "1"
         run: |
           python analyze.py
+
+      - name: "Validate Analysis Output"
+        if: always()
+        run: |
+          if [ ! -f "output/analysis.json" ]; then
+            echo "::error ::analysis.json was not generated."
+            exit 1
+          fi
+
+          echo "Analysis output generated successfully."
+
+          if [ -f "output/report.html" ]; then
+            echo "HTML report generated successfully."
+          else
+            echo "::warning ::report.html was not generated."
+          fi
 
       - name: "Publish Job Summary"
         if: always()
         run: |
-          if [ -f "output/analysis.json" ]; then
-            python -c '
-import json
-with open("output/analysis.json") as f:
-    d = json.load(f)
-apk = d.get("apk_info", {})
-billing = d.get("billing", {})
-cls = d.get("class_analysis", {})
-clf = d.get("classification", {})
-verifs = d.get("boolean_verification_locations", [])
-ctors = d.get("constructors", [])
-obf = d.get("obfuscation", {})
-ai = d.get("ai_reasoning", {})
-
-summary = f"""### APK ANALYSIS SUMMARY
-- **Package**: `{apk.get("package_name", "Unknown")}`
-- **Version**: `{apk.get("version_name", "N/A")} ({apk.get("version_code", "N/A")})`
-- **DEX count**: `{len(d.get("dex_files", []))}`
-- **Obfuscated**: `{obf.get("status", "NO")}`
-- **Billing detected**: `{", ".join(billing.get("providers_detected", [])) or "None"}`
-- **Payment architecture**: `{clf.get("classification", "UNKNOWN")}`
-
-- **Primary purchase class**: `{cls.get("primary_purchase_class", "None")}`
-- **Primary purchase method**: `{cls.get("primary_boolean_method", "None")}`
-- **DEX**: `{cls.get("primary_boolean_dex", "N/A")}`
-- **Signature**: `{cls.get("primary_boolean_signature", "()Z")}`
-
-- **Boolean verification**: `{verifs[0]["class_name"] + "->" + verifs[0]["method_name"] if verifs else "None detected"}`
-- **Constructor premium check**: `{ctors[0]["verification"] if ctors else "NO"}`
-
-- **Confidence**: `{clf.get("confidence", "LOW")}`
-"""
-with open(os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null"), "a") as out:
-    out.write(summary)
-'
+          if [ ! -f "output/analysis.json" ]; then
+            echo "No analysis.json available."
+            exit 0
           fi
+
+          python - <<'PY'
+          import json
+          import os
+
+          with open(
+              "output/analysis.json",
+              "r",
+              encoding="utf-8"
+          ) as f:
+              data = json.load(f)
+
+          apk = data.get("apk_info") or {}
+          billing = data.get("billing") or {}
+          cls = data.get("class_analysis") or {}
+          clf = data.get("classification") or {}
+          obf = data.get("obfuscation") or {}
+          ai = data.get("ai_reasoning") or {}
+
+          verifications = (
+              data.get(
+                  "boolean_verification_locations"
+              )
+              or []
+          )
+
+          constructors = (
+              data.get("constructors")
+              or []
+          )
+
+          dex_files = (
+              data.get("dex_files")
+              or []
+          )
+
+          providers = (
+              billing.get(
+                  "providers_detected"
+              )
+              or []
+          )
+
+          primary_verification = "None detected"
+
+          if verifications:
+              v = verifications[0] or {}
+
+              v_class = v.get(
+                  "class_name",
+                  "Unknown"
+              )
+
+              v_method = v.get(
+                  "method_name",
+                  "Unknown"
+              )
+
+              primary_verification = (
+                  f"{v_class}->{v_method}"
+              )
+
+          constructor_check = "NO"
+
+          if constructors:
+              constructor_check = (
+                  constructors[0].get(
+                      "verification",
+                      "NO"
+                  )
+                  or "NO"
+              )
+
+          summary = f"""### APK / APKS ANALYSIS SUMMARY
+
+          - **Package**: `{apk.get("package_name", "Unknown")}`
+          - **Version**: `{apk.get("version_name", "N/A")} ({apk.get("version_code", "N/A")})`
+          - **Input type**: `{apk.get("input_type", data.get("input_type", "APK"))}`
+          - **DEX count**: `{len(dex_files)}`
+          - **Analysis quality**: `{data.get("analysis_quality", "UNKNOWN")}`
+          - **Obfuscated**: `{obf.get("status", "NO")}`
+
+          #### Billing
+
+          - **Billing detected**: `{", ".join(providers) or "None"}`
+          - **Google Play Billing**: `{billing.get("has_google_play", False)}`
+          - **RevenueCat**: `{billing.get("has_revenuecat", False)}`
+          - **Qonversion**: `{billing.get("has_qonversion", False)}`
+          - **Adapty**: `{billing.get("has_adapty", False)}`
+          - **Custom billing**: `{billing.get("has_custom", False)}`
+
+          #### Entitlement / Boolean Analysis
+
+          - **Payment architecture**: `{clf.get("classification", "UNKNOWN")}`
+          - **Classification confidence**: `{clf.get("confidence", "LOW")}`
+          - **Primary purchase class**: `{cls.get("primary_purchase_class", "None")}`
+          - **Primary premium class**: `{cls.get("primary_premium_class", "None")}`
+          - **Primary boolean method**: `{cls.get("primary_boolean_method", "None")}`
+          - **Boolean DEX**: `{cls.get("primary_boolean_dex", "N/A")}`
+          - **Boolean signature**: `{cls.get("primary_boolean_signature", "N/A")}`
+
+          #### Verification
+
+          - **Verification locations**: `{len(verifications)}`
+          - **Primary verification**: `{primary_verification}`
+          - **Constructor premium check**: `{constructor_check}`
+          - **Constructor findings**: `{len(constructors)}`
+
+          #### AI Reasoning
+
+          - **Purchase logic exists**: `{ai.get("purchase_logic_exists", "UNKNOWN")}`
+          - **AI architecture**: `{ai.get("architecture", "UNKNOWN")}`
+          - **AI confidence**: `{ai.get("confidence", "LOW")}`
+
+          #### Pipeline
+
+          - **Analysis status**: `{data.get("analysis_status", "UNKNOWN")}`
+          - **Warnings**: `{len(data.get("warnings_or_errors") or [])}`
+          - **Limitations**: `{len(data.get("limitations") or [])}`
+          """
+
+          summary_path = os.environ.get(
+              "GITHUB_STEP_SUMMARY"
+          )
+
+          if summary_path:
+              with open(
+                  summary_path,
+                  "a",
+                  encoding="utf-8"
+              ) as out:
+                  out.write(summary)
+          PY
 
       - name: "Upload Analysis Artifacts"
         uses: actions/upload-artifact@v4
@@ -86,4 +225,5 @@ with open(os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null"), "a") as out:
           path: |
             output/analysis.json
             output/report.html
+          if-no-files-found: warn
           retention-days: 30
