@@ -18,7 +18,7 @@ The detector reports evidence and confidence. It does not modify or bypass
 billing, purchase, entitlement, or verification logic.
 """
 
-from typing import List, Dict, Set, Tuple
+from typing import List, Set
 
 from analyzer.models import (
     DexMethod,
@@ -137,9 +137,7 @@ class BillingDetector(BaseDetector):
         "com.qonversion.android.sdk.dto.QEntitlement",
     }
 
-    QONVERSION_PACKAGE = (
-        "com.qonversion.android"
-    )
+    QONVERSION_PACKAGE = "com.qonversion.android"
 
     # ------------------------------------------------------------------
     # Adapty
@@ -234,22 +232,19 @@ class BillingDetector(BaseDetector):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _unique_append(
-        values: List[str],
-        value: str,
-    ) -> None:
-        """Append a value only once."""
+    def _unique_append(values, value: str) -> None:
+        """Add a value once, supporting both list and set containers."""
 
-        if value and value not in values:
-            values.append(
-                value
-            )
+        if not value:
+            return
+
+        if isinstance(values, set):
+            values.add(value)
+        elif value not in values:
+            values.append(value)
 
     @staticmethod
-    def _contains_any(
-        text: str,
-        patterns,
-    ) -> bool:
+    def _contains_any(text: str, patterns) -> bool:
         """Case-insensitive substring matching."""
 
         if not text:
@@ -263,10 +258,7 @@ class BillingDetector(BaseDetector):
         )
 
     @staticmethod
-    def _contains_pattern(
-        text: str,
-        patterns,
-    ) -> List[str]:
+    def _contains_pattern(text: str, patterns) -> List[str]:
         """Return all matching patterns."""
 
         if not text:
@@ -308,9 +300,7 @@ class BillingDetector(BaseDetector):
         # --------------------------------------------------------------
 
         unique_classes: Set[str] = {
-            (
-                method.class_name or ""
-            )
+            method.class_name or ""
             for method in self.methods
             if method.class_name
         }
@@ -322,20 +312,14 @@ class BillingDetector(BaseDetector):
                 method.types_referenced or []
             )
 
-        all_class_evidence = (
-            unique_classes
-            | unique_types
-        )
+        all_class_evidence = unique_classes | unique_types
 
         # --------------------------------------------------------------
         # 1. Google Play Billing
         # --------------------------------------------------------------
 
-        found_gpb = (
-            unique_classes
-            .intersection(
-                self.GOOGLE_PLAY_BILLING_CLASSES
-            )
+        found_gpb = unique_classes.intersection(
+            self.GOOGLE_PLAY_BILLING_CLASSES
         )
 
         gpb_package_classes = {
@@ -355,50 +339,31 @@ class BillingDetector(BaseDetector):
                 "Google Play Billing Library",
             )
 
-            billing_classes.update(
-                found_gpb
-            )
-
-            billing_classes.update(
-                gpb_package_classes
-            )
+            billing_classes.update(found_gpb)
+            billing_classes.update(gpb_package_classes)
 
             evidence.append(
-                (
-                    "Google Play Billing classes/packages "
-                    f"detected: "
-                    f"{sorted(list(gpb_package_classes or found_gpb))[:5]}"
-                )
+                "Google Play Billing classes/packages detected: "
+                f"{sorted(list(gpb_package_classes or found_gpb))[:5]}"
             )
 
-            # Version-family estimation.
             has_product_details = any(
-                (
-                    "ProductDetails"
-                    in class_name
-                )
-                for class_name
-                in gpb_package_classes
+                "ProductDetails" in class_name
+                for class_name in gpb_package_classes
             )
 
             has_sku_details = any(
-                (
-                    "SkuDetails"
-                    in class_name
-                )
-                for class_name
-                in gpb_package_classes
+                "SkuDetails" in class_name
+                for class_name in gpb_package_classes
             )
 
             if has_product_details:
                 google_play_version = (
-                    "v5+ family "
-                    "(ProductDetails API)"
+                    "v5+ family (ProductDetails API)"
                 )
             elif has_sku_details:
                 google_play_version = (
-                    "v3-v4 family "
-                    "(SkuDetails API)"
+                    "v3-v4 family (SkuDetails API)"
                 )
             else:
                 google_play_version = (
@@ -409,11 +374,8 @@ class BillingDetector(BaseDetector):
         # 2. Legacy AIDL
         # --------------------------------------------------------------
 
-        found_aidl = (
-            unique_classes
-            .intersection(
-                self.AIDL_CLASSES
-            )
+        found_aidl = unique_classes.intersection(
+            self.AIDL_CLASSES
         )
 
         aidl_package_classes = {
@@ -433,30 +395,19 @@ class BillingDetector(BaseDetector):
                 "In-App Billing AIDL",
             )
 
-            billing_classes.update(
-                found_aidl
-            )
-
-            billing_classes.update(
-                aidl_package_classes
-            )
+            billing_classes.update(found_aidl)
+            billing_classes.update(aidl_package_classes)
 
             evidence.append(
-                (
-                    "Legacy IInAppBillingService "
-                    "AIDL interface detected."
-                )
+                "Legacy IInAppBillingService AIDL interface detected."
             )
 
         # --------------------------------------------------------------
         # 3. RevenueCat
         # --------------------------------------------------------------
 
-        found_rc = (
-            unique_classes
-            .intersection(
-                self.REVENUECAT_CLASSES
-            )
+        found_rc = unique_classes.intersection(
+            self.REVENUECAT_CLASSES
         )
 
         revenuecat_classes = {
@@ -479,11 +430,10 @@ class BillingDetector(BaseDetector):
                 revenuecat_classes
             )
 
+            billing_classes.update(found_rc)
+
             evidence.append(
-                (
-                    "RevenueCat Purchases SDK "
-                    "classes/packages detected."
-                )
+                "RevenueCat Purchases SDK classes/packages detected."
             )
 
         # --------------------------------------------------------------
@@ -553,8 +503,7 @@ class BillingDetector(BaseDetector):
                 class_name
                 for class_name in all_class_evidence
                 if any(
-                    pattern.lower()
-                    in class_name.lower()
+                    pattern.lower() in class_name.lower()
                     for pattern in patterns
                 )
             }
@@ -570,11 +519,8 @@ class BillingDetector(BaseDetector):
                 )
 
                 evidence.append(
-                    (
-                        f"{provider_name} SDK integration "
-                        f"detected: "
-                        f"{sorted(matched)[:3]}"
-                    )
+                    f"{provider_name} SDK integration detected: "
+                    f"{sorted(matched)[:3]}"
                 )
 
         # --------------------------------------------------------------
@@ -585,21 +531,11 @@ class BillingDetector(BaseDetector):
         monetization_method_count = 0
 
         for method in self.methods:
-            class_name = (
-                method.class_name or ""
-            )
+            class_name = method.class_name or ""
+            method_name = method.method_name or ""
 
-            method_name = (
-                method.method_name or ""
-            )
-
-            class_lower = (
-                class_name.lower()
-            )
-
-            method_lower = (
-                method_name.lower()
-            )
+            class_lower = class_name.lower()
+            method_lower = method_name.lower()
 
             method_repr = (
                 f"{class_name}->{method_name}"
@@ -643,11 +579,8 @@ class BillingDetector(BaseDetector):
                 )
 
                 evidence.append(
-                    (
-                        f"Method '{method_repr}' calls "
-                        "Google Play Billing API "
-                        f"pattern(s): {google_hits[:4]}"
-                    )
+                    f"Method '{method_repr}' calls Google Play Billing "
+                    f"API pattern(s): {google_hits[:4]}"
                 )
 
             # ----------------------------------------------------------
@@ -661,8 +594,7 @@ class BillingDetector(BaseDetector):
 
             if (
                 aidl_hits
-                or "iinappbillingservice"
-                in callee_text
+                or "iinappbillingservice" in callee_text
             ):
                 has_aidl = True
 
@@ -676,28 +608,23 @@ class BillingDetector(BaseDetector):
                 )
 
                 evidence.append(
-                    (
-                        f"Method '{method_repr}' "
-                        "references legacy billing "
-                        "IPC/AIDL."
-                    )
+                    f"Method '{method_repr}' references legacy "
+                    "billing IPC/AIDL."
                 )
 
             # ----------------------------------------------------------
             # RevenueCat calls
             # ----------------------------------------------------------
 
-            if (
-                self._contains_any(
-                    callee_text,
-                    (
-                        self.REVENUECAT_PACKAGE,
-                        "purchases.getinstance",
-                        "customerinfo",
-                        "activeentitlements",
-                        "restorepurchases",
-                    ),
-                )
+            if self._contains_any(
+                callee_text,
+                (
+                    self.REVENUECAT_PACKAGE,
+                    "purchases.getinstance",
+                    "customerinfo",
+                    "activeentitlements",
+                    "restorepurchases",
+                ),
             ):
                 has_revenuecat = True
 
@@ -711,11 +638,8 @@ class BillingDetector(BaseDetector):
                 )
 
                 evidence.append(
-                    (
-                        f"Method '{method_repr}' "
-                        "references RevenueCat purchase/"
-                        "entitlement APIs."
-                    )
+                    f"Method '{method_repr}' references RevenueCat "
+                    "purchase/entitlement APIs."
                 )
 
             # ----------------------------------------------------------
@@ -723,10 +647,8 @@ class BillingDetector(BaseDetector):
             # ----------------------------------------------------------
 
             if (
-                self.QONVERSION_PACKAGE
-                in callee_text
-                or "qonversion"
-                in callee_text
+                self.QONVERSION_PACKAGE in callee_text
+                or "qonversion" in callee_text
             ):
                 has_qonversion = True
 
@@ -744,10 +666,8 @@ class BillingDetector(BaseDetector):
             # ----------------------------------------------------------
 
             if (
-                self.ADAPTY_PACKAGE
-                in callee_text
-                or "adapty"
-                in callee_text
+                self.ADAPTY_PACKAGE in callee_text
+                or "adapty" in callee_text
             ):
                 has_adapty = True
 
@@ -777,8 +697,9 @@ class BillingDetector(BaseDetector):
             if class_hits or method_hits:
                 monetization_method_count += 1
 
-                billing_classes.add(
-                    class_name
+                self._unique_append(
+                    billing_classes,
+                    class_name,
                 )
 
             # ----------------------------------------------------------
@@ -795,14 +716,12 @@ class BillingDetector(BaseDetector):
                 self.MONETIZATION_CLASS_KEYWORDS,
             )
 
-            if (
-                custom_field_hits
-                or custom_type_hits
-            ):
+            if custom_field_hits or custom_type_hits:
                 custom_method_count += 1
 
-                billing_classes.add(
-                    class_name
+                self._unique_append(
+                    billing_classes,
+                    class_name,
                 )
 
                 if not (
@@ -812,8 +731,9 @@ class BillingDetector(BaseDetector):
                     or has_qonversion
                     or has_adapty
                 ):
-                    billing_methods.add(
-                        method_repr
+                    self._unique_append(
+                        billing_methods,
+                        method_repr,
                     )
 
             # ----------------------------------------------------------
@@ -834,12 +754,9 @@ class BillingDetector(BaseDetector):
                 )
 
                 evidence.append(
-                    (
-                        f"Method '{method_repr}' "
-                        "references purchase/billing "
-                        f"string pattern(s): "
-                        f"{string_hits[:5]}"
-                    )
+                    f"Method '{method_repr}' references "
+                    "purchase/billing string pattern(s): "
+                    f"{string_hits[:5]}"
                 )
 
         # --------------------------------------------------------------
@@ -871,17 +788,14 @@ class BillingDetector(BaseDetector):
             )
 
             evidence.append(
-                (
-                    "No recognized commercial billing SDK "
-                    "was required to explain the detected "
-                    "purchase/entitlement-related code; "
-                    "multiple application-owned billing "
-                    "signals were found."
-                )
+                "No recognized commercial billing SDK was required "
+                "to explain the detected purchase/entitlement-related "
+                "code; multiple application-owned billing signals "
+                "were found."
             )
 
         # --------------------------------------------------------------
-        # 9. Remove generic/false-positive classes where possible
+        # 9. Clean sets
         # --------------------------------------------------------------
 
         billing_classes = {
@@ -901,15 +815,11 @@ class BillingDetector(BaseDetector):
         # --------------------------------------------------------------
 
         providers = list(
-            dict.fromkeys(
-                providers
-            )
+            dict.fromkeys(providers)
         )
 
         unique_evidence = list(
-            dict.fromkeys(
-                evidence
-            )
+            dict.fromkeys(evidence)
         )
 
         # --------------------------------------------------------------
@@ -954,12 +864,9 @@ class BillingDetector(BaseDetector):
 
         if not providers:
             unique_evidence.append(
-                (
-                    "No recognized commercial billing SDK, "
-                    "legacy billing AIDL interface, or "
-                    "sufficient custom billing evidence "
-                    "was detected."
-                )
+                "No recognized commercial billing SDK, legacy billing "
+                "AIDL interface, or sufficient custom billing evidence "
+                "was detected."
             )
 
             confidence = Confidence.LOW
